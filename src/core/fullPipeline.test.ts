@@ -96,6 +96,7 @@ const ADAPTER_CONFIGS: Record<string, object> = {
 // Minimum variables each adapter must materialize in Figma for the import to
 // count as successful (regression floor, not exact counts).
 const MIN_VARIABLES: Record<string, number> = {
+    'ouroboros': 80,
     'tailwindcss': 400,
     'shadcn': 30,
     'base-ui': 20,

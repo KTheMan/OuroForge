@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { shadcnAdapter, parseThemesTs, alphaVariant, buildStateExtras } from './shadcnAdapter';
+import { ouroborosAdapter, OUROBOROS_COMMIT } from './ouroborosAdapter';
 import { radixColorsAdapter } from './radixColorsAdapter';
 import { muiAdapter } from './muiAdapter';
 import { chakraAdapter } from './chakraAdapter';
@@ -19,9 +20,9 @@ afterEach(() => {
 });
 
 describe('registry', () => {
-    it('registers all ten adapters', () => {
-        expect(getAllAdapters()).toHaveLength(10);
-        for (const id of ['tailwindcss', 'shadcn', 'base-ui', 'coss', 'radix-colors', 'mui', 'chakra', 'mantine', 'daisyui', 'bootstrap']) {
+    it('registers all eleven adapters', () => {
+        expect(getAllAdapters()).toHaveLength(11);
+        for (const id of ['ouroboros', 'tailwindcss', 'shadcn', 'base-ui', 'coss', 'radix-colors', 'mui', 'chakra', 'mantine', 'daisyui', 'bootstrap']) {
             expect(getAdapter(id), id).toBeDefined();
         }
     });
@@ -29,6 +30,24 @@ describe('registry', () => {
     it('resolves dependencies before dependents', () => {
         const chain = resolveAdapters(['shadcn']);
         expect(chain.map(a => a.id)).toEqual(['tailwindcss', 'shadcn']);
+    });
+});
+
+describe('ouroboros adapter', () => {
+    it('maps the public Rust token contract into Figma-ready modes', async () => {
+        const result = await ouroborosAdapter.fetchAndParse();
+        expect(result.type).toBe('theme');
+        expect(result.source).toEqual({ kind: 'bundled', version: OUROBOROS_COMMIT });
+        if (result.type === 'theme') {
+            expect(result.tokens.light.primary).toBe('#2dd4bf');
+            expect(result.tokens.dark.primary).toBe('#99f6e4');
+            expect(result.tokens.light['primitive/zinc/950']).toBe('#09090b');
+            expect(result.tokens.dark['hover-overlay']).toBe('rgba(255, 255, 255, 0.06)');
+        }
+        expect(result.extras?.floats?.find(t => t.name === 'spacing/4')?.value).toBe(16);
+        expect(result.extras?.floats?.find(t => t.name === 'control/md')?.value).toBe(32);
+        expect(result.extras?.textStyles?.find(t => t.name === 'ouroboros/body')?.fontSize).toBe(14);
+        expect(result.extras?.shadows).toHaveLength(3);
     });
 });
 

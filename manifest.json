@@ -1,6 +1,6 @@
 {
-    "name": "StyleForge",
-    "id": "1606440312407932342",
+    "name": "OuroForge",
+    "id": "ouroforge-local-development",
     "documentAccess": "dynamic-page",
     "api": "1.0.0",
     "main": "dist/code.js",

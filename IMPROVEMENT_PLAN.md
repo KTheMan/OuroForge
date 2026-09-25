@@ -1,4 +1,4 @@
-# StyleForge v2 — Improvement & Enhancement Plan
+# OuroForge — Improvement & Enhancement Plan
 
 > **Status update (2026-07-17): v2.0 IMPLEMENTED.** Everything below has shipped in this
 > working tree except the Country Club adapter, which is deliberately excluded — it will be
@@ -65,7 +65,7 @@ Ordered by expected demand and adapter effort (the `LibraryAdapter` interface + 
 
 ## 3. New features for v2
 
-3.1 **Update / re-sync flow.** Detect existing StyleForge collections (tag them with `setSharedPluginData`), diff current values against fresh tokens, and show an "Update available: 12 changed, 3 added, 1 removed" review screen before applying. Today re-running silently overwrites.
+3.1 **Update / re-sync flow.** Detect existing OuroForge collections (tag them with `setSharedPluginData`), diff current values against fresh tokens, and show an "Update available: 12 changed, 3 added, 1 removed" review screen before applying. Today re-running silently overwrites.
 
 3.2 **Selective import.** The category checkboxes exist in the UI; extend to per-group (e.g. only `chart/*`) and per-mode selection, plus "merge into existing collection" vs "create new".
 

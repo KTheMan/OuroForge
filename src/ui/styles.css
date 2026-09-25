@@ -1,4 +1,4 @@
-/* ─── StyleForge Plugin UI ──────────────────────────────────────────────────── */
+/* ─── OuroForge Plugin UI ───────────────────────────────────────────────────── */
 /* Clean, modern black/white Figma-native design with CSS variables for theming */
 
 /* ─── Reset & Tokens ──────────────────────────────────────────────────────── */
@@ -703,6 +703,61 @@ select.config-input {
 
 .dashboard-container .sticky-footer {
   margin-top: auto;
+}
+
+/* ─── Export ──────────────────────────────────────────────────────────────── */
+.export-panel {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.export-loading {
+  align-items: center;
+  justify-content: center;
+  color: var(--sf-text-secondary);
+  font-size: 12px;
+}
+
+.export-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--sf-radius-sm);
+  background: var(--sf-bg-secondary);
+}
+
+.export-tabs button {
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--sf-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.export-tabs button.active {
+  background: var(--sf-bg);
+  color: var(--sf-text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.export-output {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 330px;
+  flex: 1;
+}
+
+.export-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 /* ─── Selects: chevron + interactive states ───────────────────────────────── */

@@ -38,11 +38,11 @@ function dtcgValue(type: ExportedVariable['type'], v: FigmaColor | number | stri
 
 /**
  * Serialize collections to a DTCG document. Multi-mode collections nest under
- * `$extensions.styleforge.modes`; the first mode is the canonical `$value`.
+ * `$extensions.ouroforge.modes`; the first mode is the canonical `$value`.
  */
 export function toDtcg(collections: ExportedCollection[]): string {
     const doc: Record<string, unknown> = {
-        $description: 'Exported from Figma by StyleForge',
+        $description: 'Exported from Figma by OuroForge',
     };
 
     for (const col of collections) {
@@ -63,7 +63,7 @@ export function toDtcg(collections: ExportedCollection[]): string {
             if (col.modes.length > 1) {
                 const modes: Record<string, unknown> = {};
                 for (const m of col.modes) modes[m] = dtcgValue(v.type, v.values[m]);
-                token.$extensions = { styleforge: { modes } };
+                token.$extensions = { ouroforge: { modes } };
             }
             node[segs[segs.length - 1]] = token;
         }
@@ -78,7 +78,7 @@ export function toDtcg(collections: ExportedCollection[]): string {
  * First mode → `:root`, second mode (if any) → `.dark`.
  */
 export function toCss(collections: ExportedCollection[]): string {
-    const lines: string[] = [`/* Exported from Figma by StyleForge */`];
+    const lines: string[] = [`/* Exported from Figma by OuroForge */`];
 
     for (const col of collections) {
         lines.push(``, `/* ─── ${col.name} ─── */`);

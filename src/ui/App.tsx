@@ -3,6 +3,7 @@ import { useStore } from './store';
 import Dashboard from './components/Dashboard';
 import ConfigPanel from './components/ConfigPanel';
 import ImportProgress from './components/ImportProgress';
+import ExportPanel from './components/ExportPanel';
 import type { MainMessage, UIMessage, ImportPayload } from '../shared/messaging';
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
         setImportProgress,
         setSuccessMessage,
         setMultiMode,
+        setExportResult,
     } = useStore();
 
     const buildPayload = (): ImportPayload => ({
@@ -64,15 +66,23 @@ export default function App() {
                 case 'IMPORT_ERROR':
                     setError(msg.error);
                     break;
+
+                case 'EXPORT_RESULT':
+                    setExportResult(msg.json, msg.css);
+                    break;
+
+                case 'EXPORT_ERROR':
+                    setError(msg.error);
+                    break;
             }
         };
 
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }, [setError, setImportProgress, setSuccessMessage, setMultiMode]);
+    }, [setError, setExportResult, setImportProgress, setSuccessMessage, setMultiMode]);
 
     // ── Determine header title ──
-    let headerTitle = 'StyleForge';
+    let headerTitle = 'OuroForge';
     let showBack = false;
 
     if (view === 'config') {
@@ -80,10 +90,21 @@ export default function App() {
         showBack = true;
     } else if (view === 'importing') {
         headerTitle = 'Importing';
+    } else if (view === 'exporting') {
+        headerTitle = 'Export from Figma';
+        showBack = true;
     }
 
     const handleBack = () => {
-        if (view === 'config') setView('dashboard');
+        if (view === 'config' || view === 'exporting') setView('dashboard');
+    };
+
+    const handleExport = () => {
+        setError(null);
+        setExportResult('', '');
+        setView('exporting');
+        const msg: UIMessage = { type: 'EXPORT_TOKENS' };
+        parent.postMessage({ pluginMessage: msg }, '*');
     };
 
     const handleImport = () => {
@@ -108,7 +129,7 @@ export default function App() {
                             ← Back
                         </button>
                     ) : (
-                        <div className="header-logo">SF</div>
+                        <div className="header-logo">OF</div>
                     )}
                     <span className="header-title">{headerTitle}</span>
                 </div>
@@ -116,11 +137,15 @@ export default function App() {
 
             {/* ── Content ── */}
             <div className="content">
-                {view === 'dashboard' && <Dashboard onContinue={() => setView('config')} />}
+                {view === 'dashboard' && (
+                    <Dashboard onContinue={() => setView('config')} onExport={handleExport} />
+                )}
 
                 {view === 'config' && <ConfigPanel onImport={handleImport} />}
 
                 {view === 'importing' && <ImportProgress />}
+
+                {view === 'exporting' && <ExportPanel />}
             </div>
         </div>
     );

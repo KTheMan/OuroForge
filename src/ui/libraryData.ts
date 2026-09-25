@@ -26,6 +26,15 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export const LIBRARIES: LibraryEntry[] = [
     {
+        id: 'ouroboros',
+        name: 'Ouroboros UI',
+        description: 'Rust/egui semantic theme, core scale, typography, shadows and control metrics.',
+        type: 'theme',
+        dependencies: [],
+        categories: ['colors', 'spacing', 'radius', 'shadows', 'typography', 'opacity', 'borderWidth'],
+        defaultCollectionName: 'Ouroboros',
+    },
+    {
         id: 'tailwindcss',
         name: 'Tailwind CSS',
         description: 'Complete v4 token palette, colors, spacing, radius, shadows, typography, breakpoints.',

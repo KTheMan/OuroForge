@@ -1,4 +1,4 @@
-// ─── StyleForge, Main Thread Entry Point ────────────────────────────────────
+// ─── OuroForge, Main Thread Entry Point ─────────────────────────────────────
 // Runs in Figma's sandbox. Handles messages from the UI and delegates
 // to the core engine for variable creation, diff preview and export.
 
@@ -18,7 +18,7 @@ figma.showUI(__html__, {
     width: 420,
     height: 640,
     themeColors: true,
-    title: 'StyleForge',
+    title: 'OuroForge',
 });
 
 // ─── Plan capability detection ───────────────────────────────────────────────
@@ -32,7 +32,7 @@ async function detectMultiModeSupport(): Promise<boolean> {
         if (collections.some(c => c.modes.length > 1)) return true;
 
         // Otherwise probe with a throwaway collection.
-        const probe = figma.variables.createVariableCollection('__styleforge_probe__');
+        const probe = figma.variables.createVariableCollection('__ouroforge_probe__');
         try {
             probe.addMode('probe');
             return true;

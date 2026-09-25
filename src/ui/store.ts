@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import type { AdapterConfig, TokenCategory } from '../adapters/types';
 
-export type AppView = 'dashboard' | 'config' | 'importing';
+export type AppView = 'dashboard' | 'config' | 'importing' | 'exporting';
 
 const DEFAULT_CATEGORIES: TokenCategory[] = [
     'colors', 'spacing', 'radius', 'shadows', 'blur', 'typography',
@@ -48,6 +48,11 @@ interface StoreState {
     successMessage: string | null;
     setSuccessMessage: (msg: string | null) => void;
 
+    // Exported Figma variables
+    exportJson: string;
+    exportCss: string;
+    setExportResult: (json: string, css: string) => void;
+
     // Search
     searchQuery: string;
     setSearchQuery: (query: string) => void;
@@ -60,12 +65,9 @@ export const useStore = create<StoreState>((set) => ({
     view: 'dashboard',
     setView: (view) => set({ view }),
 
-    selectedLibraryIds: ['tailwindcss'],
+    selectedLibraryIds: ['ouroboros'],
 
     toggleLibrary: (id) => set((state) => {
-        // Tailwind is always selected
-        if (id === 'tailwindcss') return state;
-
         const isSelected = state.selectedLibraryIds.includes(id);
         const newIds = isSelected
             ? state.selectedLibraryIds.filter(libId => libId !== id)
@@ -75,7 +77,6 @@ export const useStore = create<StoreState>((set) => ({
     }),
 
     setLibrarySelected: (id, selected) => set((state) => {
-        if (id === 'tailwindcss') return state;
         if (selected && !state.selectedLibraryIds.includes(id)) {
             return { selectedLibraryIds: [...state.selectedLibraryIds, id] };
         }
@@ -122,13 +123,17 @@ export const useStore = create<StoreState>((set) => ({
     successMessage: null,
     setSuccessMessage: (msg) => set({ successMessage: msg }),
 
+    exportJson: '',
+    exportCss: '',
+    setExportResult: (json, css) => set({ exportJson: json, exportCss: css }),
+
     searchQuery: '',
     setSearchQuery: (query) => set({ searchQuery: query }),
 
     reset: () =>
         set({
             view: 'dashboard',
-            selectedLibraryIds: ['tailwindcss'],
+            selectedLibraryIds: ['ouroboros'],
             selectedCategories: DEFAULT_CATEGORIES,
             collectionName: '',
             adapterConfigs: { shadcn: { baseColor: 'neutral', accent: '' } },
@@ -137,6 +142,8 @@ export const useStore = create<StoreState>((set) => ({
             importMessage: '',
             error: null,
             successMessage: null,
+            exportJson: '',
+            exportCss: '',
             searchQuery: '',
         }),
 }));

@@ -35,9 +35,11 @@ export default function ConfigPanel({ onImport }: Props) {
         multiMode,
     } = useStore();
 
-    // Use Tailwind CSS definition for categories since it's the base
-    const baseAdapter = LIBRARIES.find(lib => lib.id === 'tailwindcss');
-    const categories = (baseAdapter?.categories || []) as TokenCategory[];
+    const categories = Array.from(new Set(
+        LIBRARIES
+            .filter(lib => selectedLibraryIds.includes(lib.id))
+            .flatMap(lib => lib.categories)
+    )) as TokenCategory[];
     const tailwindSelected = selectedLibraryIds.includes('tailwindcss');
 
     // Adapters with configurable options among the selection

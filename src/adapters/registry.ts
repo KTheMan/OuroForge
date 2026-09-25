@@ -2,6 +2,7 @@
 // Central registry of all available library adapters.
 
 import type { LibraryAdapter } from './types';
+import { ouroborosAdapter } from './ouroborosAdapter';
 import { tailwindAdapter } from './tailwindAdapter';
 import { shadcnAdapter } from './shadcnAdapter';
 import { baseUiAdapter } from './baseUiAdapter';
@@ -15,6 +16,7 @@ import { bootstrapAdapter } from './bootstrapAdapter';
 
 /** All registered adapters, keyed by ID. */
 const adapters = new Map<string, LibraryAdapter>([
+    [ouroborosAdapter.id, ouroborosAdapter],
     [tailwindAdapter.id, tailwindAdapter],
     [shadcnAdapter.id, shadcnAdapter],
     [baseUiAdapter.id, baseUiAdapter],
