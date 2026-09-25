@@ -10,6 +10,9 @@ export interface PlannedToken {
     /** Raw CSS values per mode; single-mode tokens use only `light`. */
     light?: string;
     dark?: string;
+    /** Stable target paths when the desired value is an explicit alias. */
+    lightAlias?: string;
+    darkAlias?: string;
 }
 
 export interface ExistingVariableSnapshot {
@@ -17,6 +20,8 @@ export interface ExistingVariableSnapshot {
     resolvedType: 'COLOR' | 'FLOAT' | 'STRING' | 'BOOLEAN';
     /** Values per mode name; colors as FigmaColor, others as primitives. */
     values: Record<string, FigmaColor | number | string | boolean | null>;
+    /** Stable target paths for alias-backed values. */
+    aliases?: Record<string, string | null>;
 }
 
 export interface TokenChange {
@@ -71,7 +76,22 @@ export function diffCollection(
         const ex = existingByName.get(p.name);
         if (!ex) { added.push(p.name); continue; }
 
-        for (const [mode, rawValue] of [['Light', p.light], ['Dark', p.dark]] as const) {
+        for (const [mode, rawValue, desiredAlias] of [
+            ['Light', p.light, p.lightAlias],
+            ['Dark', p.dark, p.darkAlias],
+        ] as const) {
+            if (desiredAlias !== undefined) {
+                const existingAlias = ex.aliases?.[mode] ?? null;
+                if (existingAlias !== desiredAlias) {
+                    changed.push({
+                        name: p.name,
+                        mode,
+                        from: existingAlias ? `{${existingAlias}}` : '(not aliased)',
+                        to: `{${desiredAlias}}`,
+                    });
+                }
+                continue;
+            }
             if (rawValue === undefined) continue;
             const existingVal = ex.values[mode] ?? ex.values[Object.keys(ex.values)[0]];
             if (existingVal === null || existingVal === undefined) {
@@ -97,6 +117,23 @@ export function diffCollection(
     const unmanaged = existing.filter(e => !plannedNames.has(e.name)).map(e => e.name);
 
     return { collectionName, isNew: false, added, changed, unmanaged };
+}
+
+/**
+ * Deterministic identity for the exact Figma state shown in a diff review.
+ * Used immediately before apply to reject stale previews.
+ */
+export function snapshotFingerprint(snapshot: ExistingVariableSnapshot[] | null): string {
+    if (snapshot === null) return 'missing';
+    const normalized = snapshot
+        .map(variable => ({
+            name: variable.name,
+            resolvedType: variable.resolvedType,
+            values: Object.fromEntries(Object.entries(variable.values).sort(([a], [b]) => a.localeCompare(b))),
+            aliases: Object.fromEntries(Object.entries(variable.aliases || {}).sort(([a], [b]) => a.localeCompare(b))),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    return JSON.stringify(normalized);
 }
 
 /** Flatten theme tokens ({--name: value} maps) into PlannedTokens. */

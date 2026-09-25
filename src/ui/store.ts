@@ -2,13 +2,15 @@
 
 import { create } from 'zustand';
 import type { AdapterConfig, TokenCategory } from '../adapters/types';
+import type { CollectionDiff } from '../core/diffEngine';
 
-export type AppView = 'dashboard' | 'config' | 'importing' | 'exporting';
+export type AppView = 'dashboard' | 'config' | 'diff' | 'importing' | 'exporting';
 
 const DEFAULT_CATEGORIES: TokenCategory[] = [
     'colors', 'spacing', 'radius', 'shadows', 'blur', 'typography',
     'opacity', 'breakpoints', 'containers', 'fontWeights', 'tracking', 'leading',
     'maxWidth', 'borderWidth', 'skew',
+    'motion', 'graph', 'layout', 'components',
 ];
 
 interface StoreState {
@@ -21,7 +23,7 @@ interface StoreState {
     toggleLibrary: (id: string) => void;
     setLibrarySelected: (id: string, selected: boolean) => void;
 
-    // Configuration (Applied to Tailwind base)
+    // Configuration (applied to every selected adapter)
     selectedCategories: TokenCategory[];
     toggleCategory: (cat: TokenCategory) => void;
     setSelectedCategories: (cats: TokenCategory[]) => void;
@@ -51,7 +53,14 @@ interface StoreState {
     // Exported Figma variables
     exportJson: string;
     exportCss: string;
-    setExportResult: (json: string, css: string) => void;
+    exportManifest: string;
+    setExportResult: (json: string, css: string, manifest?: string) => void;
+
+    // Pre-import review
+    diffs: CollectionDiff[];
+    setDiffs: (diffs: CollectionDiff[]) => void;
+    reviewId: string;
+    setReviewId: (reviewId: string) => void;
 
     // Search
     searchQuery: string;
@@ -125,7 +134,13 @@ export const useStore = create<StoreState>((set) => ({
 
     exportJson: '',
     exportCss: '',
-    setExportResult: (json, css) => set({ exportJson: json, exportCss: css }),
+    exportManifest: '',
+    setExportResult: (json, css, manifest = '') => set({ exportJson: json, exportCss: css, exportManifest: manifest }),
+
+    diffs: [],
+    setDiffs: (diffs) => set({ diffs }),
+    reviewId: '',
+    setReviewId: (reviewId) => set({ reviewId }),
 
     searchQuery: '',
     setSearchQuery: (query) => set({ searchQuery: query }),
@@ -144,6 +159,9 @@ export const useStore = create<StoreState>((set) => ({
             successMessage: null,
             exportJson: '',
             exportCss: '',
+            exportManifest: '',
+            diffs: [],
+            reviewId: '',
             searchQuery: '',
         }),
 }));

@@ -8,7 +8,7 @@ import type { CollectionDiff } from '../core/diffEngine';
 // ─── UI → Main Thread ────────────────────────────────────────────────────────
 
 export type UIMessage =
-    | { type: 'IMPORT_TOKENS'; payload: ImportPayload }
+    | { type: 'IMPORT_TOKENS'; payload: ImportPayload; reviewId: string }
     | { type: 'REQUEST_DIFF'; payload: ImportPayload }
     | { type: 'EXPORT_TOKENS' }
     | { type: 'CLOSE' };
@@ -30,9 +30,9 @@ export type MainMessage =
     | { type: 'IMPORT_PROGRESS'; progress: ImportProgress }
     | { type: 'IMPORT_COMPLETE'; totalCreated: number; sources: AdapterSource[]; modesLimited: boolean }
     | { type: 'IMPORT_ERROR'; error: string }
-    | { type: 'DIFF_RESULT'; diffs: CollectionDiff[]; sources: AdapterSource[] }
+    | { type: 'DIFF_RESULT'; diffs: CollectionDiff[]; sources: AdapterSource[]; reviewId: string }
     | { type: 'DIFF_ERROR'; error: string }
-    | { type: 'EXPORT_RESULT'; json: string; css: string }
+    | { type: 'EXPORT_RESULT'; json: string; css: string; manifest: string }
     | { type: 'EXPORT_ERROR'; error: string };
 
 export interface AdapterSource {

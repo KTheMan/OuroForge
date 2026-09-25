@@ -4,6 +4,7 @@ import Dashboard from './components/Dashboard';
 import ConfigPanel from './components/ConfigPanel';
 import ImportProgress from './components/ImportProgress';
 import ExportPanel from './components/ExportPanel';
+import DiffPanel from './components/DiffPanel';
 import type { MainMessage, UIMessage, ImportPayload } from '../shared/messaging';
 
 export default function App() {
@@ -19,6 +20,9 @@ export default function App() {
         setSuccessMessage,
         setMultiMode,
         setExportResult,
+        setDiffs,
+        reviewId,
+        setReviewId,
     } = useStore();
 
     const buildPayload = (): ImportPayload => ({
@@ -58,7 +62,7 @@ export default function App() {
                         ? ' Light mode only — this file\u2019s plan allows a single variable mode, so Dark values were skipped.'
                         : '';
                     setSuccessMessage(
-                        `Successfully imported ${msg.totalCreated} tokens into your Figma file.${modeNote}${suffix}`
+                        `Successfully imported ${msg.totalCreated} managed items into your Figma file.${modeNote}${suffix}`
                     );
                     break;
                 }
@@ -68,18 +72,29 @@ export default function App() {
                     break;
 
                 case 'EXPORT_RESULT':
-                    setExportResult(msg.json, msg.css);
+                    setExportResult(msg.json, msg.css, msg.manifest);
                     break;
 
                 case 'EXPORT_ERROR':
                     setError(msg.error);
+                    break;
+
+                case 'DIFF_RESULT':
+                    setDiffs(msg.diffs);
+                    setReviewId(msg.reviewId);
+                    setView('diff');
+                    break;
+
+                case 'DIFF_ERROR':
+                    setError(msg.error);
+                    setView('diff');
                     break;
             }
         };
 
         window.addEventListener('message', handler);
         return () => window.removeEventListener('message', handler);
-    }, [setError, setExportResult, setImportProgress, setSuccessMessage, setMultiMode]);
+    }, [setDiffs, setError, setExportResult, setImportProgress, setReviewId, setSuccessMessage, setMultiMode, setView]);
 
     // ── Determine header title ──
     let headerTitle = 'OuroForge';
@@ -93,15 +108,19 @@ export default function App() {
     } else if (view === 'exporting') {
         headerTitle = 'Export from Figma';
         showBack = true;
+    } else if (view === 'diff') {
+        headerTitle = 'Review Changes';
+        showBack = true;
     }
 
     const handleBack = () => {
         if (view === 'config' || view === 'exporting') setView('dashboard');
+        if (view === 'diff') setView('config');
     };
 
     const handleExport = () => {
         setError(null);
-        setExportResult('', '');
+        setExportResult('', '', '');
         setView('exporting');
         const msg: UIMessage = { type: 'EXPORT_TOKENS' };
         parent.postMessage({ pluginMessage: msg }, '*');
@@ -115,7 +134,18 @@ export default function App() {
         setError(null);
         setImportProgress(0, 'Starting...', 'Fetching tokens...');
 
-        const msg: UIMessage = { type: 'IMPORT_TOKENS', payload };
+        const msg: UIMessage = { type: 'IMPORT_TOKENS', payload, reviewId };
+        parent.postMessage({ pluginMessage: msg }, '*');
+    };
+
+    const handleReview = () => {
+        const payload = buildPayload();
+        if (payload.adapterIds.length === 0) return;
+        setError(null);
+        setDiffs([]);
+        setReviewId('');
+        setView('diff');
+        const msg: UIMessage = { type: 'REQUEST_DIFF', payload };
         parent.postMessage({ pluginMessage: msg }, '*');
     };
 
@@ -141,7 +171,9 @@ export default function App() {
                     <Dashboard onContinue={() => setView('config')} onExport={handleExport} />
                 )}
 
-                {view === 'config' && <ConfigPanel onImport={handleImport} />}
+                {view === 'config' && <ConfigPanel onReview={handleReview} />}
+
+                {view === 'diff' && <DiffPanel onApply={handleImport} />}
 
                 {view === 'importing' && <ImportProgress />}
 

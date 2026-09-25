@@ -722,7 +722,7 @@ select.config-input {
 
 .export-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px;
   padding: 3px;
   border-radius: var(--sf-radius-sm);
@@ -759,6 +759,53 @@ select.config-input {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
+
+/* ─── Diff review ─────────────────────────────────────────────────────────── */
+.diff-panel {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.diff-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.diff-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-sm);
+  background: var(--sf-bg-secondary);
+}
+
+.diff-summary strong { font-size: 18px; }
+.diff-summary span, .diff-note { color: var(--sf-text-secondary); font-size: 11px; }
+
+.diff-collection {
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-sm);
+  overflow: hidden;
+}
+
+.diff-collection h3 { margin: 0; padding: 10px; font-size: 12px; }
+
+.diff-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--sf-border);
+  font-size: 11px;
+}
+
+.diff-row small { color: var(--sf-text-secondary); overflow-wrap: anywhere; }
+.diff-collection .diff-note { margin: 0; padding: 8px 10px; }
 
 /* ─── Selects: chevron + interactive states ───────────────────────────────── */
 .select-wrap {

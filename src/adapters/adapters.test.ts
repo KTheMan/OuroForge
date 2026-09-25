@@ -39,6 +39,8 @@ describe('ouroboros adapter', () => {
         expect(result.type).toBe('theme');
         expect(result.source).toEqual({ kind: 'bundled', version: OUROBOROS_COMMIT });
         if (result.type === 'theme') {
+            expect(Object.keys(result.tokens.light)).toHaveLength(61);
+            expect(Object.keys(result.tokens.dark)).toHaveLength(61);
             expect(result.tokens.light.primary).toBe('#2dd4bf');
             expect(result.tokens.dark.primary).toBe('#99f6e4');
             expect(result.tokens.light['primitive/zinc/950']).toBe('#09090b');
@@ -46,8 +48,27 @@ describe('ouroboros adapter', () => {
         }
         expect(result.extras?.floats?.find(t => t.name === 'spacing/4')?.value).toBe(16);
         expect(result.extras?.floats?.find(t => t.name === 'control/md')?.value).toBe(32);
+        expect(result.extras?.floats).toHaveLength(101);
+        expect(result.extras?.aliases).toHaveLength(32);
+        expect(result.extras?.aliases?.every(alias =>
+            result.type === 'theme' &&
+            alias.lightTarget in result.tokens.light &&
+            alias.darkTarget in result.tokens.dark
+        )).toBe(true);
         expect(result.extras?.textStyles?.find(t => t.name === 'ouroboros/body')?.fontSize).toBe(14);
+        expect(result.extras?.textStyles?.map(style => style.name)).toEqual([
+            'ouroboros/display', 'ouroboros/h1', 'ouroboros/h2', 'ouroboros/heading',
+            'ouroboros/body', 'ouroboros/body-strong', 'ouroboros/label',
+            'ouroboros/label-strong', 'ouroboros/caption', 'ouroboros/code', 'ouroboros/kbd',
+        ]);
         expect(result.extras?.shadows).toHaveLength(3);
+        expect(result.extras?.floats?.filter(token => token.codeSyntax?.includes('tokens::layout::'))).toHaveLength(26);
+        for (const required of [
+            'typography/leading/tight', 'motion/duration/fast', 'graph/grid-spacing',
+            'layout/sidebar-width', 'layout/progress-min-width',
+        ]) {
+            expect(result.extras?.floats?.some(token => token.name === required), required).toBe(true);
+        }
     });
 });
 

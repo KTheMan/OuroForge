@@ -5,6 +5,129 @@
 import type { FigmaColor } from './colorUtils';
 import { colorsMatch } from './colorUtils';
 
+export const OUROFORGE_NAMESPACE = 'ouroforge';
+export const MANAGED_COLLECTION_KEY = 'managedCollection';
+export const MANAGED_TOKEN_KEY = 'managedToken';
+export const MANAGED_STYLE_KEY = 'managedStyle';
+
+export interface ManagedCollectionMetadata {
+    adapterId: string;
+    sourceVersion?: string;
+    schemaVersion: 1;
+}
+
+export interface ManagedTokenMetadata {
+    adapterId: string;
+    tokenId: string;
+    sourcePath?: string;
+    schemaVersion: 1;
+}
+
+export interface ManagedStyleMetadata {
+    adapterId: string;
+    kind: 'text' | 'effect';
+    /** Stable canonical identity; unlike `name`, this survives user renames. */
+    styleId?: string;
+    schemaVersion: 1;
+}
+
+function readSharedData<T>(node: PluginDataMixin, key: string): T | null {
+    try {
+        const raw = node.getSharedPluginData(OUROFORGE_NAMESPACE, key);
+        return raw ? JSON.parse(raw) as T : null;
+    } catch (_error) {
+        return null;
+    }
+}
+
+function writeSharedData(node: PluginDataMixin, key: string, value: unknown): void {
+    try {
+        node.setSharedPluginData(OUROFORGE_NAMESPACE, key, JSON.stringify(value));
+    } catch (_error) {
+        // Test doubles and older plugin hosts may not expose shared plugin data.
+    }
+}
+
+export function markManagedCollection(
+    collection: VariableCollection,
+    adapterId: string,
+    sourceVersion?: string
+): void {
+    writeSharedData(collection, MANAGED_COLLECTION_KEY, {
+        adapterId,
+        sourceVersion,
+        schemaVersion: 1,
+    } satisfies ManagedCollectionMetadata);
+}
+
+export function getManagedCollectionMetadata(collection: VariableCollection): ManagedCollectionMetadata | null {
+    return readSharedData<ManagedCollectionMetadata>(collection, MANAGED_COLLECTION_KEY);
+}
+
+export function getManagedTokenMetadata(variable: Variable): ManagedTokenMetadata | null {
+    return readSharedData<ManagedTokenMetadata>(variable, MANAGED_TOKEN_KEY);
+}
+
+export function getManagedStyleMetadata(style: BaseStyle): ManagedStyleMetadata | null {
+    return readSharedData<ManagedStyleMetadata>(style, MANAGED_STYLE_KEY);
+}
+
+function managedStyleId(adapterId: string, kind: ManagedStyleMetadata['kind'], name: string): string {
+    return `${adapterId}:${kind}:${name}`;
+}
+
+/**
+ * Resolve a managed style exclusively by immutable OuroForge identity.
+ *
+ * Metadata written by early OuroForge builds omitted `styleId`. We migrate one
+ * of those styles only when its plugin-owned adapter/kind metadata and its
+ * canonical display name both agree. An untagged same-name style is never
+ * adopted or modified.
+ */
+export function findOrCreateManagedStyle<T extends BaseStyle>(
+    styles: readonly T[],
+    create: () => T,
+    name: string,
+    adapterId: string,
+    kind: ManagedStyleMetadata['kind'],
+): T {
+    const styleId = managedStyleId(adapterId, kind, name);
+    let style = styles.find(candidate => {
+        const metadata = getManagedStyleMetadata(candidate);
+        return metadata?.adapterId === adapterId
+            && metadata.kind === kind
+            && metadata.styleId === styleId;
+    });
+
+    if (!style) {
+        const legacyCandidates = styles.filter(candidate => {
+            const metadata = getManagedStyleMetadata(candidate);
+            return metadata?.adapterId === adapterId
+                && metadata.kind === kind
+                && !metadata.styleId
+                && candidate.name === name;
+        });
+        if (legacyCandidates.length === 1) style = legacyCandidates[0];
+    }
+
+    if (!style) style = create();
+    style.name = name;
+    writeSharedData(style, MANAGED_STYLE_KEY, {
+        adapterId,
+        kind,
+        styleId,
+        schemaVersion: 1,
+    } satisfies ManagedStyleMetadata);
+    return style;
+}
+
+export function setManagedTokenSource(variable: Variable, sourcePath: string): void {
+    const metadata = getManagedTokenMetadata(variable);
+    if (!metadata) return;
+    writeSharedData(variable, MANAGED_TOKEN_KEY, { ...metadata, sourcePath });
+    variable.description = `Ouroboros source: ${sourcePath}`;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface CollectionInfo {
@@ -22,13 +145,20 @@ export interface VariableEntry {
 // ─── Collection Management ───────────────────────────────────────────────────
 
 /**
- * Find an existing collection by name or create a new one.
+ * Find an existing unmanaged collection by name, or a managed collection by
+ * adapter identity, then create one when no safe match exists.
  */
-export async function findOrCreateCollection(name: string): Promise<CollectionInfo> {
+export async function findOrCreateCollection(name: string, adapterId?: string): Promise<CollectionInfo> {
     const collections = await figma.variables.getLocalVariableCollectionsAsync();
-    const existing = collections.find((c: VariableCollection) => c.name === name);
+    // A display name is not ownership. Managed imports resolve only the
+    // collection carrying their immutable adapter identity; an unmanaged
+    // same-name collection remains untouched.
+    const existing = adapterId
+        ? collections.find((c: VariableCollection) => getManagedCollectionMetadata(c)?.adapterId === adapterId)
+        : collections.find((c: VariableCollection) => c.name === name);
 
     if (existing) {
+        if (adapterId) existing.name = name;
         const modeIds: Record<string, string> = {};
         for (const mode of existing.modes) {
             modeIds[mode.name] = mode.modeId;
@@ -101,6 +231,39 @@ export async function findOrCreateVariable(
     if (existing) return existing;
 
     return figma.variables.createVariable(name, collection, type);
+}
+
+/**
+ * Find a variable by immutable OuroForge token identity. Display names are
+ * deliberately never used as an ownership fallback: a same-name user variable
+ * must remain untouched and a separately managed token is created instead.
+ */
+export async function findOrCreateManagedVariable(
+    collection: VariableCollection,
+    name: string,
+    type: VariableResolvedDataType,
+    adapterId?: string
+): Promise<Variable> {
+    if (!adapterId) return findOrCreateVariable(collection, name, type);
+
+    const tokenId = `${adapterId}:${name}`;
+    const allVars = await figma.variables.getLocalVariablesAsync(type);
+    let variable = allVars.find((candidate: Variable) => {
+        if (candidate.variableCollectionId !== collection.id) return false;
+        const metadata = getManagedTokenMetadata(candidate);
+        return metadata?.adapterId === adapterId && metadata.tokenId === tokenId;
+    });
+    if (!variable) variable = figma.variables.createVariable(name, collection, type);
+
+    variable.name = name;
+    const existingMetadata = getManagedTokenMetadata(variable);
+    writeSharedData(variable, MANAGED_TOKEN_KEY, {
+        adapterId,
+        tokenId,
+        ...(existingMetadata?.sourcePath ? { sourcePath: existingMetadata.sourcePath } : {}),
+        schemaVersion: 1,
+    } satisfies ManagedTokenMetadata);
+    return variable;
 }
 
 /**

@@ -17,7 +17,12 @@ import {
     setStringVariable,
     setVariableAlias,
     findOrCreateVariable,
+    findOrCreateManagedVariable,
+    findOrCreateManagedStyle,
+    getManagedTokenMetadata,
     getVariablesInCollection,
+    markManagedCollection,
+    setManagedTokenSource,
     resolveColorAlias,
     type CollectionInfo,
 } from './variableManager';
@@ -41,6 +46,9 @@ export interface ImportOptions {
     importBorderWidth: boolean;
     importOpacity: boolean;
     importSkew: boolean;
+    importMotion: boolean;
+    importGraph: boolean;
+    importLayout: boolean;
 }
 
 export interface ThemeImportOptions extends ImportOptions {
@@ -51,6 +59,10 @@ export interface ThemeImportOptions extends ImportOptions {
     extras?: ThemeExtras;
     /** CSS custom-property prefix for code syntax, e.g. '' → var(--primary). */
     codeSyntaxPrefix?: string;
+    /** Stable adapter identity stored on managed Figma collections/variables. */
+    adapterId?: string;
+    /** Source revision stored with the managed collection for drift detection. */
+    sourceVersion?: string;
 }
 
 export interface ImportProgress {
@@ -61,6 +73,35 @@ export interface ImportProgress {
 }
 
 export type ProgressCallback = (progress: ImportProgress) => void;
+
+function themeNameEnabled(name: string, options: ThemeImportOptions): boolean {
+    if (name.startsWith('spacing/')) return options.importSpacing;
+    if (name === 'radius' || name.startsWith('radius/')) return options.importRadius;
+    if (name.startsWith('typography/')) return options.importTypography;
+    if (name.startsWith('opacity/')) return options.importOpacity;
+    if (name.startsWith('border/')) return options.importBorderWidth;
+    if (name.startsWith('layout/breakpoint')) return options.importBreakpoints;
+    if (name.startsWith('layout/container')) return options.importContainers || options.importMaxWidth;
+    if (name.startsWith('layout/')) return options.importLayout;
+    if (name.startsWith('control/') || name.startsWith('icon/') || name.startsWith('hit/')) {
+        return options.importLayout;
+    }
+    if (name.startsWith('focus/')) return options.importBorderWidth;
+    if (name.startsWith('motion/')) return options.importMotion;
+    if (name.startsWith('graph/')) return options.importGraph;
+    return true;
+}
+
+function ouroborosSourcePath(adapterId: string | undefined, name: string): string | undefined {
+    if (adapterId !== 'ouroboros') return undefined;
+    if (name.startsWith('primitive/')) {
+        return `ouroboros_ui::tokens::core::${name.slice('primitive/'.length).replace(/[/-]/g, '_').toUpperCase()}`;
+    }
+    if (name.startsWith('theme/zinc/')) {
+        return `ouroboros_ui::tokens::semantic::Theme::zinc_${name.slice('theme/zinc/'.length).replace(/-/g, '_')}`;
+    }
+    return `ouroboros_ui::tokens::semantic::Theme::${name.replace(/-/g, '_')}`;
+}
 
 // ─── Scope Helpers ───────────────────────────────────────────────────────────
 
@@ -482,6 +523,9 @@ export async function importThemeTokens(
     options: ThemeImportOptions,
     onProgress?: ProgressCallback
 ): Promise<CollectionInfo> {
+    if (options.importTypography && options.extras?.textStyles) {
+        await preflightStrictFonts(options.extras.textStyles);
+    }
     var allKeys = new Set([
         ...Object.keys(options.lightTokens),
         ...Object.keys(options.darkTokens),
@@ -489,8 +533,11 @@ export async function importThemeTokens(
     var total = allKeys.size;
     var current = 0;
 
-    var info = await findOrCreateCollection(options.collectionName);
+    var info = await findOrCreateCollection(options.collectionName, options.adapterId);
     info = ensureModes(info, ['Light', 'Dark']);
+    if (options.adapterId) {
+        markManagedCollection(info.collection, options.adapterId, options.sourceVersion);
+    }
     var lightModeId = info.modeIds['Light'];
     // undefined on Free/Starter files (1-mode plan limit) — dark values are skipped.
     var darkModeId: string | undefined = info.modeIds['Dark'];
@@ -520,10 +567,12 @@ export async function importThemeTokens(
         var lightColor = lightValue ? parseColorValue(lightValue) : null;
         var darkColor = darkValue ? parseColorValue(darkValue) : null;
 
-        if (lightColor || darkColor) {
-            var variable = await findOrCreateVariable(info.collection, cleanName, 'COLOR');
+        if ((lightColor || darkColor) && options.importColors) {
+            var variable = await findOrCreateManagedVariable(info.collection, cleanName, 'COLOR', options.adapterId);
             applyScopes(variable, ['ALL_FILLS', 'STROKE_COLOR', 'EFFECT_COLOR'] as VariableScope[]);
             setCodeSyntax(variable, 'var(--' + cleanName + ')');
+            const sourcePath = ouroborosSourcePath(options.adapterId, cleanName);
+            if (sourcePath) setManagedTokenSource(variable, sourcePath);
 
             if (lightColor) {
                 var alias = resolveColorAlias(lightColor, primitiveVars, primitiveModeId);
@@ -545,14 +594,16 @@ export async function importThemeTokens(
         }
 
         // ── Non-color theme tokens (dimensions like `radius`) ──
-        if (!lightColor && !darkColor) {
+        if (!lightColor && !darkColor && themeNameEnabled(cleanName, options)) {
             var dimSource = lightValue || darkValue;
             var dim = dimSource ? parseDimension(dimSource) : null;
             if (dim !== null) {
-                var fv = await findOrCreateVariable(info.collection, cleanName, 'FLOAT');
+                var fv = await findOrCreateManagedVariable(info.collection, cleanName, 'FLOAT', options.adapterId);
                 var isRadius = cleanName.indexOf('radius') >= 0;
                 applyScopes(fv, (isRadius ? ['CORNER_RADIUS'] : ['GAP', 'WIDTH_HEIGHT']) as VariableScope[]);
                 setCodeSyntax(fv, 'var(--' + cleanName + ')');
+                const sourcePath = ouroborosSourcePath(options.adapterId, cleanName);
+                if (sourcePath) setManagedTokenSource(fv, sourcePath);
                 var lightDim = lightValue ? parseDimension(lightValue) : null;
                 var darkDim = darkValue ? parseDimension(darkValue) : null;
                 fv.setValueForMode(lightModeId, lightDim !== null ? lightDim : dim);
@@ -565,7 +616,7 @@ export async function importThemeTokens(
                         ['radius-xl', 1.4], ['radius-2xl', 1.8], ['radius-3xl', 2.2], ['radius-4xl', 2.6],
                     ];
                     for (var sd = 0; sd < scaleDefs.length; sd++) {
-                        var sv = await findOrCreateVariable(info.collection, scaleDefs[sd][0], 'FLOAT');
+                        var sv = await findOrCreateManagedVariable(info.collection, scaleDefs[sd][0], 'FLOAT', options.adapterId);
                         applyScopes(sv, ['CORNER_RADIUS'] as VariableScope[]);
                         setCodeSyntax(sv, 'var(--' + scaleDefs[sd][0] + ')');
                         var scaled = Math.round(dim * scaleDefs[sd][1] * 100) / 100;
@@ -587,45 +638,84 @@ export async function importThemeTokens(
         var ex = options.extras;
         if (ex.floats) {
             for (const f of ex.floats) {
-                const fv2 = await findOrCreateVariable(info.collection, f.name, 'FLOAT');
+                if (!themeNameEnabled(f.name, options)) continue;
+                const fv2 = await findOrCreateManagedVariable(info.collection, f.name, 'FLOAT', options.adapterId);
                 applyScopes(fv2, f.scopes as VariableScope[]);
-                if (f.codeSyntax) setCodeSyntax(fv2, f.codeSyntax);
+                setCodeSyntax(fv2, `var(--${f.name.replace(/\//g, '-')})`);
+                if (f.codeSyntax) setManagedTokenSource(fv2, f.codeSyntax);
                 fv2.setValueForMode(lightModeId, f.value);
                 if (darkModeId) fv2.setValueForMode(darkModeId, f.value);
             }
         }
         if (ex.strings) {
             for (const st of ex.strings) {
-                const sv2 = await findOrCreateVariable(info.collection, st.name, 'STRING');
+                if (!themeNameEnabled(st.name, options)) continue;
+                const sv2 = await findOrCreateManagedVariable(info.collection, st.name, 'STRING', options.adapterId);
                 applyScopes(sv2, st.scopes as VariableScope[]);
-                if (st.codeSyntax) setCodeSyntax(sv2, st.codeSyntax);
+                setCodeSyntax(sv2, `var(--${st.name.replace(/\//g, '-')})`);
+                if (st.codeSyntax) setManagedTokenSource(sv2, st.codeSyntax);
                 sv2.setValueForMode(lightModeId, st.value);
                 if (darkModeId) sv2.setValueForMode(darkModeId, st.value);
             }
         }
-        if (ex.stateColors) {
+        if (ex.stateColors && options.importColors) {
             for (const sc of ex.stateColors) {
                 const lightC = parseColorValue(sc.light);
                 const darkC = parseColorValue(sc.dark);
                 if (!lightC && !darkC) continue;
-                const cv = await findOrCreateVariable(info.collection, sc.name, 'COLOR');
+                const cv = await findOrCreateManagedVariable(info.collection, sc.name, 'COLOR', options.adapterId);
                 applyScopes(cv, (sc.scopes || ['ALL_FILLS', 'STROKE_COLOR']) as VariableScope[]);
                 if (sc.codeSyntax) setCodeSyntax(cv, sc.codeSyntax);
+                if (sc.codeSyntax) setManagedTokenSource(cv, sc.codeSyntax);
                 if (lightC) cv.setValueForMode(lightModeId, lightC);
                 if (darkC && darkModeId) cv.setValueForMode(darkModeId, darkC);
             }
         }
-        if (ex.shadows) {
+        if (ex.aliases && options.importColors) {
+            const collectionVariables = await getVariablesInCollection(info.collection.id);
+            const variablesByName = new Map(collectionVariables
+                .filter(variable => {
+                    if (!options.adapterId) return true;
+                    return getManagedTokenMetadata(variable)?.adapterId === options.adapterId;
+                })
+                .map(variable => [variable.name, variable]));
+            for (const aliasDefinition of ex.aliases) {
+                const lightTarget = variablesByName.get(aliasDefinition.lightTarget);
+                const darkTarget = variablesByName.get(aliasDefinition.darkTarget);
+                if (!lightTarget || !darkTarget) {
+                    throw new Error(
+                        `OuroForge alias ${aliasDefinition.name} references a missing target ` +
+                        `(${aliasDefinition.lightTarget} / ${aliasDefinition.darkTarget}).`
+                    );
+                }
+                const aliasVariable = await findOrCreateManagedVariable(
+                    info.collection,
+                    aliasDefinition.name,
+                    lightTarget.resolvedType,
+                    options.adapterId
+                );
+                applyScopes(aliasVariable, (aliasDefinition.scopes || ['ALL_FILLS', 'STROKE_COLOR']) as VariableScope[]);
+                setCodeSyntax(aliasVariable, `var(--${aliasDefinition.name.replace(/\//g, '-')})`);
+                if (aliasDefinition.codeSyntax) setManagedTokenSource(aliasVariable, aliasDefinition.codeSyntax);
+                setVariableAlias(aliasVariable, lightModeId, lightTarget);
+                if (darkModeId) setVariableAlias(aliasVariable, darkModeId, darkTarget);
+            }
+        }
+        if (ex.shadows && options.importShadows) {
             for (const sh of ex.shadows) {
                 const layers = parseShadowValue(sh.value);
                 if (layers.length > 0) {
-                    await createShadowStyle(sh.name, { name: sh.name, shadows: layers, rawValue: sh.value });
+                    await createShadowStyle(
+                        sh.name,
+                        { name: sh.name, shadows: layers, rawValue: sh.value },
+                        options.adapterId,
+                    );
                 }
             }
         }
-        if (ex.textStyles) {
+        if (ex.textStyles && options.importTypography) {
             for (const ts of ex.textStyles) {
-                await createSimpleTextStyle(ts);
+                await createSimpleTextStyle(ts, info.collection, options.adapterId);
             }
         }
     }
@@ -641,25 +731,58 @@ const WEIGHT_STYLES: Record<number, string> = {
     500: 'Medium', 600: 'Semi Bold', 700: 'Bold', 800: 'Extra Bold', 900: 'Black',
 };
 
+async function preflightStrictFonts(styles: NonNullable<ThemeExtras['textStyles']>): Promise<void> {
+    const strictFonts = new Map<string, FontName>();
+    for (const style of styles) {
+        const family = mapFontFamily(style.family || 'Inter');
+        if (!family.startsWith('Iosevka')) continue;
+        const fontName = {
+            family,
+            style: style.fontStyle || WEIGHT_STYLES[style.fontWeight || 400] || 'Regular',
+        };
+        strictFonts.set(`${fontName.family}/${fontName.style}`, fontName);
+    }
+    for (const fontName of strictFonts.values()) {
+        try {
+            await figma.loadFontAsync(fontName);
+        } catch (_error) {
+            throw new Error(
+                `Missing required Ouroboros font "${fontName.family} ${fontName.style}". ` +
+                'Install the vendored Iosevka fonts from the Ouroboros UI assets before importing typography.'
+            );
+        }
+    }
+}
+
 export async function createSimpleTextStyle(ts: {
     name: string; family?: string; fontSize: number;
     fontWeight?: number; lineHeight?: number; letterSpacing?: number;
-}): Promise<void> {
+    fontStyle?: string;
+    bindings?: Partial<Record<'fontSize' | 'lineHeight' | 'letterSpacing' | 'fontFamily' | 'fontWeight', string>>;
+}, collection?: VariableCollection, adapterId?: string): Promise<TextStyle | undefined> {
     var family = mapFontFamily(ts.family || 'Inter');
-    var styleName = WEIGHT_STYLES[ts.fontWeight || 400] || 'Regular';
+    var styleName = ts.fontStyle || WEIGHT_STYLES[ts.fontWeight || 400] || 'Regular';
     var fontName = { family: family, style: styleName };
     try {
         await figma.loadFontAsync(fontName);
     } catch (e) {
+        if (family.startsWith('Iosevka')) {
+            throw new Error(
+                `Missing required Ouroboros font "${fontName.family} ${fontName.style}". ` +
+                'Install the vendored Iosevka fonts from the Ouroboros UI assets.'
+            );
+        }
         fontName = { family: 'Inter', style: WEIGHT_STYLES[ts.fontWeight || 400] || 'Regular' };
         try { await figma.loadFontAsync(fontName); }
         catch (e2) {
             fontName = { family: 'Inter', style: 'Regular' };
-            try { await figma.loadFontAsync(fontName); } catch (e3) { return; }
+            try { await figma.loadFontAsync(fontName); } catch (e3) { return undefined; }
         }
     }
-    var existing = (await figma.getLocalTextStylesAsync()).find(function (s: TextStyle) { return s.name === ts.name; });
-    var style = existing || figma.createTextStyle();
+    const allTextStyles = await figma.getLocalTextStylesAsync();
+    var style = adapterId
+        ? findOrCreateManagedStyle(allTextStyles, () => figma.createTextStyle(), ts.name, adapterId, 'text')
+        : allTextStyles.find(function (s: TextStyle) { return s.name === ts.name; }) || figma.createTextStyle();
     style.name = ts.name;
     style.fontName = fontName;
     style.fontSize = ts.fontSize;
@@ -670,6 +793,27 @@ export async function createSimpleTextStyle(ts: {
     if (ts.letterSpacing !== undefined) {
         style.letterSpacing = { value: ts.letterSpacing, unit: 'PIXELS' };
     }
+    if (collection && ts.bindings) {
+        const variables = await getVariablesInCollection(collection.id);
+        const byName = new Map(variables
+            .filter(variable => {
+                if (!adapterId) return true;
+                const metadata = getManagedTokenMetadata(variable);
+                return metadata?.adapterId === adapterId
+                    && metadata.tokenId === `${adapterId}:${variable.name}`;
+            })
+            .map(variable => [variable.name, variable]));
+        for (const [field, variableName] of Object.entries(ts.bindings)) {
+            const variable = byName.get(variableName);
+            if (!variable) continue;
+            try {
+                style.setBoundVariable(field as VariableBindableTextField, variable);
+            } catch (_error) {
+                // Some Figma plans/hosts do not support every text-style binding.
+            }
+        }
+    }
+    return style;
 }
 
 // ─── Text Style Creation ─────────────────────────────────────────────────────
@@ -764,10 +908,11 @@ async function createTextStyle(
 
 // ─── Effect Style Creation ───────────────────────────────────────────────────
 
-async function createShadowStyle(name: string, shadow: ParsedShadow): Promise<void> {
+async function createShadowStyle(name: string, shadow: ParsedShadow, adapterId?: string): Promise<EffectStyle> {
     const allEffectStyles = await figma.getLocalEffectStylesAsync();
-    var existing = allEffectStyles.find(function (s: EffectStyle) { return s.name === name; });
-    var style = existing || figma.createEffectStyle();
+    var style = adapterId
+        ? findOrCreateManagedStyle(allEffectStyles, () => figma.createEffectStyle(), name, adapterId, 'effect')
+        : allEffectStyles.find(function (s: EffectStyle) { return s.name === name; }) || figma.createEffectStyle();
     style.name = name;
 
     style.effects = shadow.shadows.map(function (layer) {
@@ -781,6 +926,7 @@ async function createShadowStyle(name: string, shadow: ParsedShadow): Promise<vo
             blendMode: 'NORMAL' as BlendMode,
         };
     });
+    return style;
 }
 
 async function createBlurStyle(name: string, radius: number, isBackdrop: boolean, variable?: Variable): Promise<void> {

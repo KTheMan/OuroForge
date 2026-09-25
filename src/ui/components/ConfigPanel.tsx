@@ -19,13 +19,17 @@ const CATEGORY_LABELS: Record<TokenCategory, string> = {
     maxWidth: 'Max Width',
     borderWidth: 'Border Width',
     skew: 'Skew',
+    motion: 'Motion',
+    graph: 'Graph',
+    layout: 'Layout & Controls',
+    components: 'Components',
 };
 
 interface Props {
-    onImport: () => void;
+    onReview: () => void;
 }
 
-export default function ConfigPanel({ onImport }: Props) {
+export default function ConfigPanel({ onReview }: Props) {
     const {
         selectedLibraryIds,
         selectedCategories,
@@ -40,8 +44,6 @@ export default function ConfigPanel({ onImport }: Props) {
             .filter(lib => selectedLibraryIds.includes(lib.id))
             .flatMap(lib => lib.categories)
     )) as TokenCategory[];
-    const tailwindSelected = selectedLibraryIds.includes('tailwindcss');
-
     // Adapters with configurable options among the selection
     const configurable = LIBRARIES.filter(
         lib => selectedLibraryIds.includes(lib.id) && lib.configOptions && lib.configOptions.length > 0
@@ -53,11 +55,11 @@ export default function ConfigPanel({ onImport }: Props) {
 
     return (
         <>
-            {tailwindSelected && (
+            {categories.length > 0 && (
                 <>
                     <div className="config-intro">
                         <strong>Configuration</strong>
-                        <p>Tailwind CSS primitives will include:</p>
+                        <p>Choose the token categories to review and import:</p>
                     </div>
 
                     <div className="config-section">
@@ -136,10 +138,10 @@ export default function ConfigPanel({ onImport }: Props) {
             <div className="sticky-footer">
                 <button
                     className="btn btn-primary"
-                    onClick={onImport}
+                    onClick={onReview}
                     disabled={selectedCategories.length === 0}
                 >
-                    Import {selectedLibraryIds.length} {selectedLibraryIds.length === 1 ? 'Library' : 'Libraries'}
+                    Review {selectedLibraryIds.length} {selectedLibraryIds.length === 1 ? 'Library' : 'Libraries'}
                 </button>
             </div>
         </>

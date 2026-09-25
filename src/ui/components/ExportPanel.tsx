@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
 
-type Format = 'json' | 'css';
+type Format = 'manifest' | 'json' | 'css';
 
 export default function ExportPanel() {
-    const { exportJson, exportCss, error } = useStore();
-    const [format, setFormat] = useState<Format>('json');
+    const { exportJson, exportCss, exportManifest, error } = useStore();
+    const [format, setFormat] = useState<Format>('manifest');
     const [copied, setCopied] = useState(false);
 
-    const value = format === 'json' ? exportJson : exportCss;
-    const extension = format === 'json' ? 'json' : 'css';
+    const value = format === 'manifest' ? exportManifest : format === 'json' ? exportJson : exportCss;
+    const extension = format === 'css' ? 'css' : 'json';
 
     const handleCopy = async () => {
         await navigator.clipboard.writeText(value);
@@ -19,12 +19,12 @@ export default function ExportPanel() {
 
     const handleDownload = () => {
         const blob = new Blob([value], {
-            type: format === 'json' ? 'application/json' : 'text/css',
+            type: format === 'css' ? 'text/css' : 'application/json',
         });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `ouroforge-tokens.${extension}`;
+        link.download = format === 'manifest' ? 'ouroforge-manifest.json' : `ouroforge-tokens.${extension}`;
         link.click();
         URL.revokeObjectURL(url);
     };
@@ -48,6 +48,9 @@ export default function ExportPanel() {
     return (
         <div className="export-panel">
             <div className="export-tabs" role="tablist" aria-label="Export format">
+                <button className={format === 'manifest' ? 'active' : ''} onClick={() => setFormat('manifest')}>
+                    Manifest
+                </button>
                 <button className={format === 'json' ? 'active' : ''} onClick={() => setFormat('json')}>
                     DTCG JSON
                 </button>

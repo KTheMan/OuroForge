@@ -31,7 +31,11 @@ export const LIBRARIES: LibraryEntry[] = [
         description: 'Rust/egui semantic theme, core scale, typography, shadows and control metrics.',
         type: 'theme',
         dependencies: [],
-        categories: ['colors', 'spacing', 'radius', 'shadows', 'typography', 'opacity', 'borderWidth'],
+        categories: [
+            'colors', 'spacing', 'radius', 'shadows', 'typography', 'opacity',
+            'borderWidth', 'breakpoints', 'containers', 'maxWidth',
+            'motion', 'graph', 'layout', 'components',
+        ],
         defaultCollectionName: 'Ouroboros',
     },
     {

@@ -20,7 +20,11 @@ export type TokenCategory =
     | 'leading'
     | 'maxWidth'
     | 'borderWidth'
-    | 'skew';
+    | 'skew'
+    | 'motion'
+    | 'graph'
+    | 'layout'
+    | 'components';
 
 export const ALL_CATEGORIES: TokenCategory[] = [
     'colors',
@@ -38,6 +42,10 @@ export const ALL_CATEGORIES: TokenCategory[] = [
     'maxWidth',
     'borderWidth',
     'skew',
+    'motion',
+    'graph',
+    'layout',
+    'components',
 ];
 
 // ─── Adapter Config & Source ─────────────────────────────────────────────────
@@ -71,12 +79,75 @@ export interface AdapterConfigOption {
 export interface ThemeExtras {
     floats?: { name: string; value: number; scopes: string[]; codeSyntax?: string }[];
     strings?: { name: string; value: string; scopes: string[]; codeSyntax?: string }[];
+    /** Explicit mode-aware variable aliases. Targets are stable variable paths in the same collection. */
+    aliases?: { name: string; lightTarget: string; darkTarget: string; scopes?: string[]; codeSyntax?: string }[];
     /** Mode-aware colors whose alpha differs per mode (state recipes like ring/50). Raw CSS color strings. */
     stateColors?: { name: string; light: string; dark: string; scopes?: string[]; codeSyntax?: string }[];
     /** CSS box-shadow strings turned into Figma effect styles. */
     shadows?: { name: string; value: string }[];
     /** Simple text styles (values already resolved to px). */
-    textStyles?: { name: string; family?: string; fontSize: number; fontWeight?: number; lineHeight?: number; letterSpacing?: number }[];
+    textStyles?: {
+        name: string;
+        family?: string;
+        fontSize: number;
+        fontWeight?: number;
+        lineHeight?: number;
+        letterSpacing?: number;
+        /** Exact Figma font style when numeric-weight inference is insufficient. */
+        fontStyle?: string;
+        /** Stable variable paths to bind to supported text-style properties. */
+        bindings?: Partial<Record<'fontSize' | 'lineHeight' | 'letterSpacing' | 'fontFamily' | 'fontWeight', string>>;
+    }[];
+}
+
+// ─── Component Facsimile Recipes ────────────────────────────────────────────
+
+/** The public Ouroboros module tier that owns a component. */
+export type ComponentLayer = 'atom' | 'cell' | 'molecule' | 'organism' | 'graph';
+
+/**
+ * `visual-facsimile` recipes reproduce useful static structure and variants.
+ * `behavioral-only` recipes document anatomy and states, but their runtime
+ * interaction/state machine remains authoritative in Rust.
+ */
+export type ComponentFidelity = 'visual-facsimile' | 'behavioral-only';
+
+export interface ComponentVariantAxis {
+    name: string;
+    values: string[];
+    defaultValue: string;
+}
+
+export type ComponentSlotKind = 'text' | 'icon' | 'control' | 'content' | 'action' | 'collection';
+
+export interface ComponentSlotRecipe {
+    name: string;
+    kind: ComponentSlotKind;
+    optional?: boolean;
+}
+
+export interface ComponentLayoutRecipe {
+    direction: 'horizontal' | 'vertical';
+    width: number;
+    minHeight: number;
+    gapToken: string;
+    paddingToken: string;
+    fillToken?: string;
+    borderToken?: string;
+    radiusToken?: string;
+}
+
+/** Versionable, renderer-independent description of one public component. */
+export interface ComponentRecipe {
+    id: string;
+    name: string;
+    rustPath: string;
+    layer: ComponentLayer;
+    fidelity: ComponentFidelity;
+    description: string;
+    slots: ComponentSlotRecipe[];
+    variants?: ComponentVariantAxis[];
+    layout: ComponentLayoutRecipe;
 }
 
 // ─── Adapter Interface ───────────────────────────────────────────────────────

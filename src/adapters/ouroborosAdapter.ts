@@ -29,7 +29,49 @@ const primitiveColors: Record<string, string> = {
     'primitive/amber/500': '#f59e0b',
     'primitive/blue/400': '#60a5fa',
     'primitive/blue/500': '#3b82f6',
+    'primitive/scrim': 'rgba(0, 0, 0, 0.6)',
 };
+
+const aliases: NonNullable<ThemeExtras['aliases']> = [
+    ['background', 'primitive/zinc/50', 'primitive/zinc/950'],
+    ['foreground', 'primitive/zinc/950', 'primitive/zinc/50'],
+    ['card', 'primitive/zinc/50', 'primitive/zinc/900'],
+    ['card-foreground', 'primitive/zinc/950', 'primitive/zinc/50'],
+    ['popover', 'primitive/zinc/50', 'primitive/zinc/900'],
+    ['popover-foreground', 'primitive/zinc/950', 'primitive/zinc/50'],
+    ['muted', 'primitive/zinc/100', 'primitive/zinc/800'],
+    ['muted-foreground', 'primitive/zinc/500', 'primitive/zinc/400'],
+    ['disabled-foreground', 'primitive/zinc/400', 'primitive/zinc/600'],
+    ['primary', 'primitive/teal/400', 'primitive/teal/200'],
+    ['primary-foreground', 'primitive/zinc/950', 'primitive/zinc/950'],
+    ['primary-hover', 'primitive/teal/500', 'primitive/teal/300'],
+    ['secondary', 'primitive/zinc/100', 'primitive/zinc/800'],
+    ['secondary-foreground', 'primitive/zinc/900', 'primitive/zinc/50'],
+    ['accent', 'primitive/zinc/100', 'primitive/zinc/800'],
+    ['accent-foreground', 'primitive/zinc/900', 'primitive/zinc/50'],
+    ['destructive', 'primitive/red/500', 'primitive/red/500'],
+    ['destructive-foreground', 'primitive/zinc/50', 'primitive/zinc/50'],
+    ['border', 'primitive/zinc/200', 'primitive/zinc/800'],
+    ['border-strong', 'primitive/zinc/300', 'primitive/zinc/700'],
+    ['input', 'primitive/zinc/200', 'primitive/zinc/800'],
+    ['ring', 'primitive/teal/400', 'primitive/teal/300'],
+    ['scrim', 'primitive/scrim', 'primitive/scrim'],
+    ['success', 'primitive/green/500', 'primitive/green/500'],
+    ['warning', 'primitive/amber/500', 'primitive/amber/500'],
+    ['error', 'primitive/red/500', 'primitive/red/500'],
+    ['info', 'primitive/blue/400', 'primitive/blue/400'],
+    ['neutral', 'primitive/zinc/500', 'primitive/zinc/500'],
+    ['theme/zinc/primary', 'primitive/zinc/900', 'primitive/zinc/50'],
+    ['theme/zinc/primary-foreground', 'primitive/zinc/50', 'primitive/zinc/900'],
+    ['theme/zinc/primary-hover', 'primitive/zinc/700', 'primitive/zinc/200'],
+    ['theme/zinc/ring', 'primitive/zinc/400', 'primitive/zinc/300'],
+].map(([name, lightTarget, darkTarget]) => ({
+    name,
+    lightTarget,
+    darkTarget,
+    scopes: ['ALL_FILLS', 'STROKE_COLOR', 'EFFECT_COLOR'],
+    codeSyntax: `ouroboros_ui::tokens::semantic::Theme::${name.replace(/^theme\/zinc\//, '').replace(/-/g, '_')}`,
+}));
 
 const lightSemantic: Record<string, string> = {
     background: '#fafafa',
@@ -67,6 +109,10 @@ const lightSemantic: Record<string, string> = {
     'info-bg': 'rgba(59, 130, 246, 0.149)',
     neutral: '#71717a',
     'neutral-bg': 'rgba(113, 113, 122, 0.149)',
+    'theme/zinc/primary': '#18181b',
+    'theme/zinc/primary-foreground': '#fafafa',
+    'theme/zinc/primary-hover': '#3f3f46',
+    'theme/zinc/ring': '#a1a1aa',
 };
 
 const darkSemantic: Record<string, string> = {
@@ -105,14 +151,24 @@ const darkSemantic: Record<string, string> = {
     'info-bg': 'rgba(59, 130, 246, 0.149)',
     neutral: '#71717a',
     'neutral-bg': 'rgba(113, 113, 122, 0.149)',
+    'theme/zinc/primary': '#fafafa',
+    'theme/zinc/primary-foreground': '#18181b',
+    'theme/zinc/primary-hover': '#e4e4e7',
+    'theme/zinc/ring': '#d4d4d8',
 };
 
-const float = (name: string, value: number, scopes: string[], rustName: string) => ({
+const rustFloat = (name: string, value: number, scopes: string[], rustPath: string) => ({
     name,
     value,
     scopes,
-    codeSyntax: `ouroboros_ui::tokens::core::${rustName}`,
+    codeSyntax: `ouroboros_ui::${rustPath}`,
 });
+
+const float = (name: string, value: number, scopes: string[], rustName: string) =>
+    rustFloat(name, value, scopes, `tokens::core::${rustName}`);
+
+const layoutFloat = (name: string, value: number, scopes: string[], rustName: string) =>
+    rustFloat(name, value, scopes, `tokens::layout::${rustName}`);
 
 const floats: NonNullable<ThemeExtras['floats']> = [
     ...[
@@ -136,6 +192,25 @@ const floats: NonNullable<ThemeExtras['floats']> = [
         ['lg', 0.8, 'TRACKING_LG'], ['wide', 1, 'TRACKING_WIDE'],
     ].map(([name, value, rust]) => float(`typography/tracking/${name}`, value as number, ['LETTER_SPACING'], rust as string)),
     ...[
+        ['tight', 1.2, 'LEADING_TIGHT'], ['normal', 1.45, 'LEADING_NORMAL'],
+        ['relaxed', 1.6, 'LEADING_RELAXED'],
+    ].map(([name, value, rust]) => float(`typography/leading/${name}`, value as number, [], rust as string)),
+    ...[
+        ['light', 300, 'Weight::Light'], ['regular', 400, 'Weight::Regular'],
+        ['medium', 500, 'Weight::Medium'], ['semibold', 600, 'Weight::SemiBold'],
+        ['bold', 700, 'Weight::Bold'],
+    ].map(([name, value, rust]) => rustFloat(`typography/weight/${name}`, value as number, ['FONT_WEIGHT'], `theme::typography::${rust}`)),
+    ...[
+        ['display', 36], ['h1', 28.8], ['h2', 24], ['heading', 19.2],
+        ['body', 20.3], ['body-strong', 20.3], ['label', 18.85],
+        ['label-strong', 18.85], ['caption', 17.4], ['code', 18.85], ['kbd', 17.4],
+    ].map(([name, value]) => rustFloat(
+        `typography/role/${name}/line-height`,
+        value as number,
+        ['LINE_HEIGHT'],
+        `theme::typography::${String(name).replace(/-/g, '_')}`
+    )),
+    ...[
         ['sm', 26, 'CONTROL_SM'], ['md', 32, 'CONTROL_MD'], ['lg', 38, 'CONTROL_LG'],
     ].map(([name, value, rust]) => float(`control/${name}`, value as number, ['WIDTH_HEIGHT'], rust as string)),
     ...[
@@ -149,12 +224,51 @@ const floats: NonNullable<ThemeExtras['floats']> = [
     float('opacity/muted', 0.7, ['OPACITY'], 'OPACITY_MUTED'),
     float('opacity/hover-overlay', 0.06, ['OPACITY'], 'HOVER_OVERLAY'),
     float('opacity/press-overlay', 0.12, ['OPACITY'], 'PRESS_OVERLAY'),
+    float('motion/duration/instant', 0, [], 'DURATION_INSTANT'),
+    float('motion/duration/fast', 0.1, [], 'DURATION_FAST'),
+    float('motion/duration/normal', 0.18, [], 'DURATION_NORMAL'),
+    float('motion/duration/slow', 0.3, [], 'DURATION_SLOW'),
+    float('motion/duration/delay-short', 0.15, [], 'DURATION_DELAY_SHORT'),
+    float('motion/duration/delay-long', 0.5, [], 'DURATION_DELAY_LONG'),
+    float('graph/grid-dot-radius', 1, ['WIDTH_HEIGHT'], 'GRID_DOT_RADIUS'),
+    float('graph/grid-spacing', 28, ['GAP'], 'GRID_SPACING'),
+    float('graph/edge-width', 2, ['STROKE_FLOAT'], 'EDGE_WIDTH'),
+    float('graph/edge-hit-radius', 6, ['WIDTH_HEIGHT'], 'EDGE_HIT_RADIUS'),
+    float('graph/handle-radius', 5, ['WIDTH_HEIGHT'], 'HANDLE_RADIUS'),
+    float('graph/marquee-alpha', 38, [], 'MARQUEE_ALPHA'),
+    layoutFloat('layout/sidebar-width', 240, ['WIDTH_HEIGHT'], 'SIDEBAR_WIDTH'),
+    layoutFloat('layout/inspector-width', 300, ['WIDTH_HEIGHT'], 'INSPECTOR_WIDTH'),
+    layoutFloat('layout/panel-min', 180, ['WIDTH_HEIGHT'], 'PANEL_MIN'),
+    layoutFloat('layout/panel-max', 480, ['WIDTH_HEIGHT'], 'PANEL_MAX'),
+    layoutFloat('layout/toolbar-height', 40, ['WIDTH_HEIGHT'], 'TOOLBAR_HEIGHT'),
+    layoutFloat('layout/statusbar-height', 24, ['WIDTH_HEIGHT'], 'STATUSBAR_HEIGHT'),
+    layoutFloat('layout/panel-pad', 16, ['GAP'], 'PANEL_PAD'),
+    layoutFloat('layout/panel-gap', 8, ['GAP'], 'PANEL_GAP'),
+    layoutFloat('layout/grid-columns', 12, [], 'GRID_COLUMNS'),
+    layoutFloat('layout/grid-gutter', 16, ['GAP'], 'GRID_GUTTER'),
+    layoutFloat('layout/container-max', 1200, ['WIDTH_HEIGHT'], 'CONTAINER_MAX'),
+    layoutFloat('layout/breakpoint-compact', 720, ['WIDTH_HEIGHT'], 'BREAKPOINT_COMPACT'),
+    layoutFloat('layout/breakpoint-normal', 1024, ['WIDTH_HEIGHT'], 'BREAKPOINT_NORMAL'),
+    layoutFloat('layout/breakpoint-wide', 1440, ['WIDTH_HEIGHT'], 'BREAKPOINT_WIDE'),
+    layoutFloat('layout/field-horizontal-min', 480, ['WIDTH_HEIGHT'], 'FIELD_HORIZONTAL_MIN'),
+    layoutFloat('layout/property-label-width', 120, ['WIDTH_HEIGHT'], 'PROPERTY_LABEL_WIDTH'),
+    layoutFloat('layout/inspector-row-stack-min', 220, ['WIDTH_HEIGHT'], 'INSPECTOR_ROW_STACK_MIN'),
+    layoutFloat('layout/table-row-height', 28, ['WIDTH_HEIGHT'], 'TABLE_ROW_HEIGHT'),
+    layoutFloat('layout/control-min-width', 72, ['WIDTH_HEIGHT'], 'CONTROL_MIN_W'),
+    layoutFloat('layout/input-min-width', 96, ['WIDTH_HEIGHT'], 'INPUT_MIN_W'),
+    layoutFloat('layout/numeric-min-width', 48, ['WIDTH_HEIGHT'], 'NUMERIC_MIN_W'),
+    layoutFloat('layout/numeric-stepper-min-width', 88, ['WIDTH_HEIGHT'], 'NUMERIC_STEPPER_MIN_W'),
+    layoutFloat('layout/field-number-width', 120, ['WIDTH_HEIGHT'], 'FIELD_NUM_W'),
+    layoutFloat('layout/numeric-stepper-width', 120, ['WIDTH_HEIGHT'], 'NUMERIC_STEPPER_W'),
+    layoutFloat('layout/slider-min-width', 120, ['WIDTH_HEIGHT'], 'SLIDER_MIN_W'),
+    layoutFloat('layout/progress-min-width', 64, ['WIDTH_HEIGHT'], 'PROGRESS_MIN_W'),
 ];
 
 const extras: ThemeExtras = {
     floats,
+    aliases,
     strings: [
-        { name: 'typography/font-sans', value: 'Iosevka Aile', scopes: ['FONT_FAMILY'], codeSyntax: 'ouroboros_ui::theme::typography' },
+        { name: 'typography/font-sans', value: 'Iosevka', scopes: ['FONT_FAMILY'], codeSyntax: 'ouroboros_ui::theme::typography' },
         { name: 'typography/font-mono', value: 'Iosevka Term', scopes: ['FONT_FAMILY'], codeSyntax: 'ouroboros_ui::theme::typography' },
     ],
     shadows: [
@@ -163,15 +277,17 @@ const extras: ThemeExtras = {
         { name: 'shadow/lg', value: '0 8px 24px 0 rgba(0, 0, 0, 0.188)' },
     ],
     textStyles: [
-        { name: 'ouroboros/display', family: 'Iosevka Aile', fontSize: 30, fontWeight: 700, lineHeight: 36, letterSpacing: 0 },
-        { name: 'ouroboros/h1', family: 'Iosevka Aile', fontSize: 24, fontWeight: 600, lineHeight: 28.8, letterSpacing: 0 },
-        { name: 'ouroboros/h2', family: 'Iosevka Aile', fontSize: 20, fontWeight: 600, lineHeight: 24, letterSpacing: 0 },
-        { name: 'ouroboros/heading', family: 'Iosevka Aile', fontSize: 16, fontWeight: 600, lineHeight: 19.2, letterSpacing: 0.4 },
-        { name: 'ouroboros/body', family: 'Iosevka Aile', fontSize: 14, fontWeight: 300, lineHeight: 20.3, letterSpacing: 0.6 },
-        { name: 'ouroboros/body-strong', family: 'Iosevka Aile', fontSize: 14, fontWeight: 500, lineHeight: 20.3, letterSpacing: 0.6 },
-        { name: 'ouroboros/label', family: 'Iosevka Aile', fontSize: 13, fontWeight: 300, lineHeight: 18.85, letterSpacing: 0.8 },
-        { name: 'ouroboros/caption', family: 'Iosevka Aile', fontSize: 12, fontWeight: 400, lineHeight: 17.4, letterSpacing: 1 },
-        { name: 'ouroboros/code', family: 'Iosevka Term', fontSize: 13, fontWeight: 400, lineHeight: 18.85, letterSpacing: 0.8 },
+        { name: 'ouroboros/display', family: 'Iosevka', fontStyle: 'Bold', fontSize: 30, fontWeight: 700, lineHeight: 36, letterSpacing: 0, bindings: { fontSize: 'typography/size/3xl', lineHeight: 'typography/role/display/line-height', letterSpacing: 'typography/tracking/normal' } },
+        { name: 'ouroboros/h1', family: 'Iosevka Semibold', fontStyle: 'Regular', fontSize: 24, fontWeight: 600, lineHeight: 28.8, letterSpacing: 0, bindings: { fontSize: 'typography/size/2xl', lineHeight: 'typography/role/h1/line-height', letterSpacing: 'typography/tracking/normal' } },
+        { name: 'ouroboros/h2', family: 'Iosevka Semibold', fontStyle: 'Regular', fontSize: 20, fontWeight: 600, lineHeight: 24, letterSpacing: 0, bindings: { fontSize: 'typography/size/xl', lineHeight: 'typography/role/h2/line-height', letterSpacing: 'typography/tracking/normal' } },
+        { name: 'ouroboros/heading', family: 'Iosevka Semibold', fontStyle: 'Regular', fontSize: 16, fontWeight: 600, lineHeight: 19.2, letterSpacing: 0.4, bindings: { fontSize: 'typography/size/lg', lineHeight: 'typography/role/heading/line-height', letterSpacing: 'typography/tracking/sm' } },
+        { name: 'ouroboros/body', family: 'Iosevka Light', fontStyle: 'Regular', fontSize: 14, fontWeight: 300, lineHeight: 20.3, letterSpacing: 0.6, bindings: { fontSize: 'typography/size/base', lineHeight: 'typography/role/body/line-height', letterSpacing: 'typography/tracking/md' } },
+        { name: 'ouroboros/body-strong', family: 'Iosevka Medium', fontStyle: 'Regular', fontSize: 14, fontWeight: 500, lineHeight: 20.3, letterSpacing: 0.6, bindings: { fontSize: 'typography/size/base', lineHeight: 'typography/role/body-strong/line-height', letterSpacing: 'typography/tracking/md' } },
+        { name: 'ouroboros/label', family: 'Iosevka Light', fontStyle: 'Regular', fontSize: 13, fontWeight: 300, lineHeight: 18.85, letterSpacing: 0.8, bindings: { fontSize: 'typography/size/sm', lineHeight: 'typography/role/label/line-height', letterSpacing: 'typography/tracking/lg' } },
+        { name: 'ouroboros/label-strong', family: 'Iosevka Medium', fontStyle: 'Regular', fontSize: 13, fontWeight: 500, lineHeight: 18.85, letterSpacing: 0.8, bindings: { fontSize: 'typography/size/sm', lineHeight: 'typography/role/label-strong/line-height', letterSpacing: 'typography/tracking/lg' } },
+        { name: 'ouroboros/caption', family: 'Iosevka', fontStyle: 'Regular', fontSize: 12, fontWeight: 400, lineHeight: 17.4, letterSpacing: 1, bindings: { fontSize: 'typography/size/xs', lineHeight: 'typography/role/caption/line-height', letterSpacing: 'typography/tracking/wide' } },
+        { name: 'ouroboros/code', family: 'Iosevka Term', fontStyle: 'Regular', fontSize: 13, fontWeight: 400, lineHeight: 18.85, letterSpacing: 0.8, bindings: { fontSize: 'typography/size/sm', lineHeight: 'typography/role/code/line-height', letterSpacing: 'typography/tracking/lg' } },
+        { name: 'ouroboros/kbd', family: 'Iosevka Term', fontStyle: 'Bold', fontSize: 12, fontWeight: 700, lineHeight: 17.4, letterSpacing: 1, bindings: { fontSize: 'typography/size/xs', lineHeight: 'typography/role/kbd/line-height', letterSpacing: 'typography/tracking/wide' } },
     ],
 };
 
@@ -184,7 +300,11 @@ export const ouroborosAdapter: LibraryAdapter = {
     type: 'theme',
     dependencies: [],
     defaultCollectionName: 'Ouroboros',
-    categories: ['colors', 'spacing', 'radius', 'shadows', 'typography', 'opacity', 'borderWidth'] as TokenCategory[],
+    categories: [
+        'colors', 'spacing', 'radius', 'shadows', 'typography', 'opacity',
+        'borderWidth', 'breakpoints', 'containers', 'maxWidth',
+        'motion', 'graph', 'layout', 'components',
+    ] as TokenCategory[],
 
     async fetchAndParse(): Promise<ThemeResult> {
         return {

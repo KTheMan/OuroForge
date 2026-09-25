@@ -87,6 +87,7 @@ const allCategoriesOn: Omit<ImportOptions, 'collectionName'> = {
     importContainers: true, importFontWeights: true, importTracking: true,
     importLeading: true, importMaxWidth: true, importBorderWidth: true,
     importOpacity: true, importSkew: true,
+    importMotion: true, importGraph: true, importLayout: true,
 };
 
 const ADAPTER_CONFIGS: Record<string, object> = {
