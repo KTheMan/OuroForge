@@ -65,6 +65,13 @@ OuroForge began as a fork of StyleForge. The original MIT copyright notice is
 retained in [LICENSE](LICENSE), and `upstream` should continue to point to
 `https://github.com/vahiidl/styleforge-figma-plugin.git`.
 
+**Upstream awareness is required; permanent compatibility is not.** OuroForge
+reviews StyleForge for useful fixes and improvements, but Ouroboros fidelity and
+the round-trip contract take priority whenever the projects' needs diverge.
+
+See [docs/UPSTREAM_ALIGNMENT.md](docs/UPSTREAM_ALIGNMENT.md) for the selective
+integration policy.
+
 ## License
 
 MIT
