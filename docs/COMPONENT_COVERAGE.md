@@ -16,6 +16,14 @@ Their declared axes expand to 217 Figma components. Fifty recipes have
 variant axes and are emitted as component sets. Stable recipe IDs and Rust paths
 are stored as plugin metadata so repeat imports update the same nodes.
 
+Visual facsimiles expose their recipe slots as native Figma component
+properties: 32 text properties, 31 optional-layer visibility properties, and
+47 instance-swap properties for icon, control, content, action, and collection
+slots. A single managed internal `SlotProvider` set supplies five deterministic
+default components. Reimport reuses that set, its variants, and the public
+property IDs, so existing instances retain their overrides without accumulating
+duplicate provider components.
+
 ## Fidelity labels
 
 - **visual-facsimile (38):** represents static anatomy, named slots, token-bound

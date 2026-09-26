@@ -42,4 +42,16 @@ describe('component import review', () => {
             first[0], { ...first[1], signature: '{"width":100}' },
         ]));
     });
+
+    it('makes an old render schema an explicit migration during review', () => {
+        const diff = componentReviewDiff(
+            [recipe('button', 'Button')],
+            [{ id: 'button', name: 'Button', renderSchema: '1', signature: '{}' }],
+            '2',
+        );
+        expect(diff.changed).toEqual([expect.objectContaining({
+            name: 'Button',
+            to: 'migrate to render schema 2',
+        })]);
+    });
 });

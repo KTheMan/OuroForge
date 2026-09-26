@@ -22,6 +22,8 @@ other framework adapters for comparison and migration work.
 - 66 public component recipes across atoms, cells, molecules, organisms, and
   graph: 38 visual facsimiles and 28 explicitly marked behavioral-only,
   producing 217 variant components across 50 component sets
+- Native text, visibility, and instance-swap properties for every declared
+  visual-facsimile slot, backed by one idempotent five-kind provider set
 - Stable plugin-owned identities that survive cosmetic Figma renames
 - A required pre-import diff, category-aware imports, and preservation of
   unmanaged variables and component-set page positions

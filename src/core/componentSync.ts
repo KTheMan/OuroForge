@@ -8,7 +8,21 @@ const FIDELITY_KEY = 'ouroforge:fidelity';
 const RUST_PATH_KEY = 'ouroforge:rustPath';
 const COMPONENT_PROPERTIES_KEY = 'ouroforge:componentProperties';
 const COMPONENT_LIBRARY_PAGE_KEY = 'ouroforge:componentLibraryPage';
+const SLOT_PROVIDER_SET_KEY = 'ouroforge:slotProviderSet';
+const SLOT_PROVIDER_KIND_KEY = 'ouroforge:slotProviderKind';
 export const OUROBOROS_COMPONENT_LIBRARY_PAGE = 'Ouroboros UI Library';
+export const COMPONENT_RENDER_SCHEMA_VERSION = '3';
+export const COMPONENT_RENDER_SCHEMA_KEY = 'ouroforge:renderSchema';
+
+type SwappableSlotKind = Exclude<ComponentSlotRecipe['kind'], 'text'>;
+
+const SWAPPABLE_SLOT_KINDS: readonly SwappableSlotKind[] = [
+    'icon',
+    'control',
+    'content',
+    'action',
+    'collection',
+];
 
 export interface ComponentSyncOptions {
     recipes?: readonly ComponentRecipe[];
@@ -34,8 +48,8 @@ type VariantValues = Record<string, string>;
 
 type TokenIndex = Map<string, Variable>;
 
-type EditablePropertyType = 'TEXT' | 'BOOLEAN';
-type EditablePropertyField = 'characters' | 'visible';
+type EditablePropertyType = 'TEXT' | 'BOOLEAN' | 'INSTANCE_SWAP';
+type EditablePropertyField = 'characters' | 'visible' | 'mainComponent';
 
 interface EditablePropertyBinding {
     id: string;
@@ -44,6 +58,13 @@ interface EditablePropertyBinding {
     defaultValue: string | boolean;
     node: SceneNode;
     field: EditablePropertyField;
+    preferredValues?: InstanceSwapPreferredValue[];
+}
+
+interface SlotProviderCatalog {
+    set: ComponentSetNode;
+    byKind: ReadonlyMap<SwappableSlotKind, ComponentNode>;
+    labelPropertyKey: string;
 }
 
 export function managedComponentsOnPage(page: PageNode): Array<ComponentNode | ComponentSetNode> {
@@ -65,7 +86,13 @@ export async function resolveComponentLibraryPage(create = false): Promise<PageN
     await figma.loadAllPagesAsync();
     const pages = figma.root.children.filter((node): node is PageNode => node.type === 'PAGE');
     const managedPages = pages
-        .map((page, index) => ({ page, index, count: managedComponentsOnPage(page).length }))
+        .map((page, index) => ({
+            page,
+            index,
+            count: managedComponentsOnPage(page).length
+                + page.findAllWithCriteria({ types: ['COMPONENT_SET'] })
+                    .filter(set => set.getPluginData(SLOT_PROVIDER_SET_KEY) === 'true').length,
+        }))
         .filter(candidate => candidate.count > 0)
         .sort((left, right) => {
             if (left.count !== right.count) return right.count - left.count;
@@ -450,6 +477,138 @@ async function addSlot(
     return { frame, text };
 }
 
+function isSwappableSlotKind(kind: ComponentSlotRecipe['kind']): kind is SwappableSlotKind {
+    return kind !== 'text';
+}
+
+function slotProviderLabel(kind: SwappableSlotKind): string {
+    return kind === 'icon' ? '◇' : kind;
+}
+
+async function renderSlotProvider(
+    component: ComponentNode,
+    kind: SwappableSlotKind,
+    index: TokenIndex,
+): Promise<TextNode> {
+    removeChildren(component);
+    component.name = `Kind=${propertyLabel(kind)}`;
+    component.description = `OuroForge default provider for ${kind} instance-swap slots.`;
+    component.setPluginData(SLOT_PROVIDER_KIND_KEY, kind);
+    component.setPluginData(COMPONENT_RENDER_SCHEMA_KEY, COMPONENT_RENDER_SCHEMA_VERSION);
+    component.layoutMode = 'HORIZONTAL';
+    component.primaryAxisSizingMode = 'AUTO';
+    component.counterAxisSizingMode = 'AUTO';
+    component.itemSpacing = 4;
+    component.paddingLeft = 6;
+    component.paddingRight = 6;
+    component.paddingTop = 4;
+    component.paddingBottom = 4;
+    component.cornerRadius = kind === 'control' || kind === 'icon' ? 6 : 3;
+    component.fills = [solidPaint({ r: 0.94, g: 0.95, b: 0.96 }, token(index, 'muted'))];
+    component.strokes = [solidPaint({ r: 0.82, g: 0.84, b: 0.87 }, token(index, 'border'))];
+    component.strokeWeight = 1;
+    component.strokeAlign = 'INSIDE';
+    component.resizeWithoutConstraints(kind === 'icon' ? 28 : 28 + kind.length * 7, 27);
+    return addText(component, slotProviderLabel(kind), index, true);
+}
+
+function arrangeSlotProviderSet(set: ComponentSetNode, providers: readonly ComponentNode[]): void {
+    const padding = 16;
+    const gap = 24;
+    const cellWidth = Math.max(...providers.map(provider => provider.width));
+    const cellHeight = Math.max(...providers.map(provider => provider.height));
+    set.layoutMode = 'NONE';
+    set.clipsContent = false;
+    providers.forEach((provider, index) => {
+        provider.x = padding + index * (cellWidth + gap);
+        provider.y = padding;
+    });
+    set.resizeWithoutConstraints(
+        padding * 2 + providers.length * cellWidth + Math.max(0, providers.length - 1) * gap,
+        padding * 2 + cellHeight,
+    );
+}
+
+async function ensureSlotProviders(
+    page: PageNode,
+    prefix: string,
+    index: TokenIndex,
+    origin: { x: number; y: number },
+): Promise<SlotProviderCatalog> {
+    const taggedSets = page.findAllWithCriteria({ types: ['COMPONENT_SET'] })
+        .filter(set => set.getPluginData(SLOT_PROVIDER_SET_KEY) === 'true');
+    let set = taggedSets[0];
+    const existingByKind = new Map<SwappableSlotKind, ComponentNode>();
+    if (set) {
+        for (const child of set.children) {
+            if (child.type !== 'COMPONENT') continue;
+            const kind = child.getPluginData(SLOT_PROVIDER_KIND_KEY) as SwappableSlotKind;
+            if (SWAPPABLE_SLOT_KINDS.includes(kind) && !existingByKind.has(kind)) {
+                existingByKind.set(kind, child);
+            }
+        }
+    }
+
+    const providers: ComponentNode[] = [];
+    const labels: TextNode[] = [];
+    for (const kind of SWAPPABLE_SLOT_KINDS) {
+        let provider = existingByKind.get(kind);
+        if (!provider) {
+            provider = figma.createComponent();
+            if (set) set.appendChild(provider);
+            else page.appendChild(provider);
+        }
+        labels.push(await renderSlotProvider(provider, kind, index));
+        providers.push(provider);
+    }
+
+    if (!set) {
+        set = figma.combineAsVariants(providers, page);
+        set.x = origin.x;
+        set.y = origin.y - 120;
+    }
+    set.name = `${prefix}/internal/SlotProvider`;
+    set.description = 'Managed defaults for OuroForge instance-swap slot properties.';
+    set.setPluginData(SLOT_PROVIDER_SET_KEY, 'true');
+    set.setPluginData(COMPONENT_RENDER_SCHEMA_KEY, COMPONENT_RENDER_SCHEMA_VERSION);
+    arrangeSlotProviderSet(set, providers);
+    reconcileEditableProperties(set, labels.map(label => ({
+        id: 'slot-provider:label',
+        name: 'Placeholder Label',
+        type: 'TEXT',
+        defaultValue: 'slot',
+        node: label,
+        field: 'characters',
+    })));
+    const labelPropertyKey = managedPropertyMap(set)['slot-provider:label'];
+    if (!labelPropertyKey) throw new Error('Could not create the slot-provider label property.');
+
+    return {
+        set,
+        byKind: new Map(providers.map((provider, providerIndex) => [
+            SWAPPABLE_SLOT_KINDS[providerIndex],
+            provider,
+        ])),
+        labelPropertyKey,
+    };
+}
+
+function addSwappableSlot(
+    parent: ComponentNode,
+    slotRecipe: ComponentSlotRecipe & { kind: SwappableSlotKind },
+    providers: SlotProviderCatalog,
+): InstanceNode {
+    const provider = providers.byKind.get(slotRecipe.kind);
+    if (!provider) throw new Error(`No slot provider exists for ${slotRecipe.kind}.`);
+    const instance = provider.createInstance();
+    instance.name = slotRecipe.optional ? `${slotRecipe.name} (optional)` : slotRecipe.name;
+    instance.setProperties({
+        [providers.labelPropertyKey]: slotRecipe.kind === 'icon' ? '◇' : slotRecipe.name,
+    });
+    parent.appendChild(instance);
+    return instance;
+}
+
 function propertyLabel(name: string): string {
     return name
         .split('-')
@@ -496,11 +655,22 @@ function ensureEditableProperty(
     }
 
     if (!key || !definition) {
-        return owner.addComponentProperty(binding.name, binding.type, binding.defaultValue);
+        return owner.addComponentProperty(
+            binding.name,
+            binding.type,
+            binding.defaultValue,
+            binding.preferredValues ? { preferredValues: binding.preferredValues } : undefined,
+        );
     }
 
-    if (definition.defaultValue !== binding.defaultValue) {
-        return owner.editComponentProperty(key, { defaultValue: binding.defaultValue });
+    const currentPreferred = definition.preferredValues || [];
+    const nextPreferred = binding.preferredValues || [];
+    const preferredChanged = JSON.stringify(currentPreferred) !== JSON.stringify(nextPreferred);
+    if (definition.defaultValue !== binding.defaultValue || preferredChanged) {
+        return owner.editComponentProperty(key, {
+            defaultValue: binding.defaultValue,
+            ...(binding.preferredValues ? { preferredValues: binding.preferredValues } : {}),
+        });
     }
     return key;
 }
@@ -519,7 +689,13 @@ function reconcileEditableProperties(
 
     const nextManaged: Record<string, string> = {};
     for (const [id, bindings] of bindingsById) {
-        const propertyKey = ensureEditableProperty(owner, managed, bindings[0]);
+        let propertyKey: string;
+        try {
+            propertyKey = ensureEditableProperty(owner, managed, bindings[0]);
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            throw new Error(`Could not reconcile ${bindings[0].type} component property "${bindings[0].name}" on "${owner.name}": ${detail}`);
+        }
         nextManaged[id] = propertyKey;
         for (const binding of bindings) {
             binding.node.componentPropertyReferences = {
@@ -534,6 +710,22 @@ function reconcileEditableProperties(
         owner.deleteComponentProperty(propertyKey);
     }
     owner.setPluginData(COMPONENT_PROPERTIES_KEY, JSON.stringify(nextManaged));
+
+    // Do not report a successful migration if Figma declined either the
+    // definition or its layer binding. This turns API/version mismatches into
+    // an actionable import error instead of a silently incomplete library.
+    for (const [id, bindings] of bindingsById) {
+        const propertyKey = nextManaged[id];
+        const definition = owner.componentPropertyDefinitions[propertyKey];
+        if (!definition || definition.type !== bindings[0].type) {
+            throw new Error(`Figma did not retain component property "${bindings[0].name}" on "${owner.name}".`);
+        }
+        for (const binding of bindings) {
+            if (binding.node.componentPropertyReferences?.[binding.field] !== propertyKey) {
+                throw new Error(`Figma did not retain the ${binding.field} binding for component property "${bindings[0].name}" on "${owner.name}".`);
+            }
+        }
+    }
 }
 
 function arrangeVariantSet(
@@ -570,6 +762,7 @@ async function renderComponent(
     recipe: ComponentRecipe,
     values: VariantValues,
     index: TokenIndex,
+    slotProviders: SlotProviderCatalog,
 ): Promise<EditablePropertyBinding[]> {
     removeChildren(component);
     component.name = displayVariantName(recipe, values);
@@ -578,6 +771,7 @@ async function renderComponent(
     component.setPluginData(VARIANT_KEY, variantKey(values));
     component.setPluginData(FIDELITY_KEY, recipe.fidelity);
     component.setPluginData(RUST_PATH_KEY, recipe.rustPath);
+    component.setPluginData(COMPONENT_RENDER_SCHEMA_KEY, COMPONENT_RENDER_SCHEMA_VERSION);
 
     const visual = resolveComponentVisual(recipe, values);
     component.layoutMode = visual.direction === 'horizontal' ? 'HORIZONTAL' : 'VERTICAL';
@@ -612,11 +806,29 @@ async function renderComponent(
     const enabledMark = values.Checked === 'True' || values.Selected === 'True' || values.Pressed === 'True' || values.State === 'Active';
     if (semanticControl && enabledMark) await addText(component, '✓', index, false, visual.foregroundToken, visual.fontSize, visual.fontSizeToken, visual.fontStyle);
     if (semanticControl) {
-        for (const slotRecipe of recipe.slots.filter(slot => slot.kind === 'icon')) {
-            const { frame } = await addSlot(component, slotRecipe, index);
-            // Optional icon layers were not rendered before editable properties
+        for (const slotRecipe of recipe.slots.filter(slot => isSwappableSlotKind(slot.kind))) {
+            const kind = slotRecipe.kind as SwappableSlotKind;
+            const frame = recipe.fidelity === 'visual-facsimile'
+                ? addSwappableSlot(
+                    component,
+                    slotRecipe as ComponentSlotRecipe & { kind: SwappableSlotKind },
+                    slotProviders,
+                )
+                : (await addSlot(component, slotRecipe, index)).frame;
+            // Optional semantic layers were hidden before editable properties
             // existed, so keep the established default appearance unchanged.
             if (slotRecipe.optional) frame.visible = false;
+            if (recipe.fidelity === 'visual-facsimile') {
+                bindings.push({
+                    id: `slot:${slotRecipe.name}:swap`,
+                    name: propertyLabel(slotRecipe.name),
+                    type: 'INSTANCE_SWAP',
+                    defaultValue: slotProviders.byKind.get(kind)!.id,
+                    preferredValues: [{ type: 'COMPONENT_SET', key: slotProviders.set.key }],
+                    node: frame,
+                    field: 'mainComponent',
+                });
+            }
             if (slotRecipe.optional) {
                 bindings.push({
                     id: `slot:${slotRecipe.name}:visible`,
@@ -660,15 +872,36 @@ async function renderComponent(
                 (recipe.id === 'field-separator' && slotRecipe.name === 'label' && values.Label === 'Hidden') ||
                 (recipe.id === 'graph-view' && slotRecipe.name === 'controls' && values.Controls === 'Off') ||
                 (recipe.id === 'graph-view' && slotRecipe.name === 'minimap' && values.Minimap === 'Off')) continue;
-            const { frame, text } = await addSlot(component, slotRecipe, index);
+            const swappable = recipe.fidelity === 'visual-facsimile' && isSwappableSlotKind(slotRecipe.kind);
+            const slotNode = swappable
+                ? addSwappableSlot(
+                    component,
+                    slotRecipe as ComponentSlotRecipe & { kind: SwappableSlotKind },
+                    slotProviders,
+                )
+                : await addSlot(component, slotRecipe, index);
+            const frame = swappable ? slotNode as InstanceNode : (slotNode as { frame: FrameNode }).frame;
+            const text = swappable ? null : (slotNode as { text: TextNode }).text;
             if (slotRecipe.kind === 'text') {
                 bindings.push({
                     id: `slot:${slotRecipe.name}:text`,
                     name: textPropertyName(recipe, slotRecipe),
                     type: 'TEXT',
                     defaultValue: slotRecipe.name,
-                    node: text,
+                    node: text!,
                     field: 'characters',
+                });
+            }
+            if (swappable) {
+                const kind = slotRecipe.kind as SwappableSlotKind;
+                bindings.push({
+                    id: `slot:${slotRecipe.name}:swap`,
+                    name: propertyLabel(slotRecipe.name),
+                    type: 'INSTANCE_SWAP',
+                    defaultValue: slotProviders.byKind.get(kind)!.id,
+                    preferredValues: [{ type: 'COMPONENT_SET', key: slotProviders.set.key }],
+                    node: frame,
+                    field: 'mainComponent',
                 });
             }
             if (slotRecipe.optional) {
@@ -716,6 +949,7 @@ export async function syncOuroborosComponents(options: ComponentSyncOptions = {}
     const libraryPage = await resolveComponentLibraryPage(true);
     if (!libraryPage) throw new Error('Unable to create the Ouroboros component library page.');
     libraryPage.setPluginData(COMPONENT_LIBRARY_PAGE_KEY, 'true');
+    const slotProviders = await ensureSlotProviders(libraryPage, prefix, index, origin);
 
     const components = libraryPage.findAllWithCriteria({ types: ['COMPONENT'] });
     const sets = libraryPage.findAllWithCriteria({ types: ['COMPONENT_SET'] });
@@ -797,7 +1031,7 @@ export async function syncOuroborosComponents(options: ComponentSyncOptions = {}
             } else {
                 updated++;
             }
-            editableBindings.push(...await renderComponent(component, recipe, values, index));
+            editableBindings.push(...await renderComponent(component, recipe, values, index, slotProviders));
             rendered.push(component);
             componentCount++;
         }
@@ -821,6 +1055,7 @@ export async function syncOuroborosComponents(options: ComponentSyncOptions = {}
             rendered[0].name = `${prefix}/${recipe.layer}s/${recipe.name}`;
         }
         reconcileEditableProperties(topLevel, editableBindings);
+        topLevel.setPluginData(COMPONENT_RENDER_SCHEMA_KEY, COMPONENT_RENDER_SCHEMA_VERSION);
 
         // Preserve any page organization done in Figma. The grid is only an
         // initial placement policy for newly materialized recipes.

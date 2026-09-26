@@ -4,6 +4,8 @@ import type { CollectionDiff } from './diffEngine';
 export interface ManagedComponentSnapshot {
     id: string;
     name: string;
+    /** Version of the generator contract that last rendered this component. */
+    renderSchema?: string;
     /** Deterministic structural signature produced by the Figma boundary. */
     signature: string;
 }
@@ -15,6 +17,7 @@ export interface ManagedComponentSnapshot {
 export function componentReviewDiff(
     recipes: readonly ComponentRecipe[],
     existing: ManagedComponentSnapshot[],
+    expectedRenderSchema?: string,
 ): CollectionDiff {
     const existingById = new Map(existing.map(component => [component.id, component]));
     const recipeIds = new Set(recipes.map(recipe => recipe.id));
@@ -28,7 +31,10 @@ export function componentReviewDiff(
                 name: recipe.name,
                 mode: 'Recipe',
                 from: existingById.get(recipe.id)!.name,
-                to: 'refresh from pinned recipe',
+                to: expectedRenderSchema
+                    && existingById.get(recipe.id)!.renderSchema !== expectedRenderSchema
+                    ? `migrate to render schema ${expectedRenderSchema}`
+                    : 'refresh from pinned recipe',
             })),
         unmanaged: existing.filter(component => !recipeIds.has(component.id)).map(component => component.name),
     };

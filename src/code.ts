@@ -14,6 +14,8 @@ import {
     isVariableModeLimitError,
 } from './core/variableManager';
 import {
+    COMPONENT_RENDER_SCHEMA_KEY,
+    COMPONENT_RENDER_SCHEMA_VERSION,
     managedComponentsOnPage,
     resolveComponentLibraryPage,
     syncOuroborosComponents,
@@ -348,6 +350,11 @@ function componentNodeSignature(node: SceneNode, includePosition = false): unkno
         variant: node.getPluginData('ouroforge:variant'),
         fidelity: node.getPluginData('ouroforge:fidelity'),
         rustPath: node.getPluginData('ouroforge:rustPath'),
+        renderSchema: node.getPluginData(COMPONENT_RENDER_SCHEMA_KEY),
+        componentPropertyDefinitions: 'componentPropertyDefinitions' in node
+            ? serializable(node.componentPropertyDefinitions)
+            : undefined,
+        componentPropertyReferences: serializable(node.componentPropertyReferences),
         children: 'children' in node
             ? node.children.map(child => componentNodeSignature(child, true))
             : [],
@@ -359,7 +366,12 @@ async function snapshotManagedComponents(): Promise<ManagedComponentSnapshot[]> 
     const nodes = page ? managedComponentsOnPage(page) : [];
     return nodes.flatMap(node => {
         const id = node.getPluginData('ouroforge:recipe');
-        return id ? [{ id, name: node.name, signature: JSON.stringify(componentNodeSignature(node)) }] : [];
+        return id ? [{
+            id,
+            name: node.name,
+            renderSchema: node.getPluginData(COMPONENT_RENDER_SCHEMA_KEY),
+            signature: JSON.stringify(componentNodeSignature(node)),
+        }] : [];
     });
 }
 
@@ -427,7 +439,11 @@ async function handleDiff(payload: ImportPayload): Promise<void> {
             if (adapter.id === 'ouroboros' && payload.categories.includes('components')) {
                 const components = await snapshotManagedComponents();
                 componentFingerprint = componentSnapshotFingerprint(components);
-                diffs.push(componentReviewDiff(OUROBOROS_COMPONENT_RECIPES, components));
+                diffs.push(componentReviewDiff(
+                    OUROBOROS_COMPONENT_RECIPES,
+                    components,
+                    COMPONENT_RENDER_SCHEMA_VERSION,
+                ));
             }
         } else {
             // Primitive sets are large; diff on color names/values only.
