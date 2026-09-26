@@ -195,6 +195,11 @@ function createFigmaMock() {
             return component;
         },
         createFrame() { return makeNode('FRAME'); },
+        createSection() {
+            const section = makeNode('SECTION');
+            figmaMock.currentPage.appendChild(section);
+            return section;
+        },
         createText() { return makeNode('TEXT'); },
         createPage() {
             const created = makeNode('PAGE');
@@ -429,6 +434,8 @@ describe('Ouroboros component sync', () => {
         expect(providerSets).toHaveLength(1);
         const providerSet = providerSets[0];
         expect(providerSet.name).toBe('Ouroboros/internal/SlotProvider');
+        expect(providerSet.parent.type).toBe('SECTION');
+        expect(providerSet.parent.name).toBe('Ouroboros Components');
         expect(providerSet.children.map((node: any) => node.getPluginData('ouroforge:slotProviderKind')))
             .toEqual(['icon', 'control', 'content', 'action', 'collection']);
         expect(providerSet.children.every((node: any) =>
@@ -468,6 +475,20 @@ describe('Ouroboros component sync', () => {
         }
     });
 
+    it('places a fresh provider set in an existing canonical component container', async () => {
+        const canonical = mock.figmaMock.createSection();
+        canonical.name = 'Ouroboros Components';
+        const selected = OUROBOROS_COMPONENT_RECIPES.filter(recipe => recipe.id === 'button');
+
+        await syncOuroborosComponents({ recipes: selected });
+
+        const providerSet = mock.page.findAllWithCriteria({ types: ['COMPONENT_SET'] })
+            .find((node: any) => node.getPluginData('ouroforge:slotProviderSet') === 'true');
+        expect(providerSet.parent).toBe(canonical);
+        expect(mock.page.children.filter((node: any) =>
+            node.type === 'SECTION' && node.name === 'Ouroboros Components')).toEqual([canonical]);
+    });
+
     it('preserves provider IDs, property IDs, and existing instance overrides across reimport', async () => {
         const selected = OUROBOROS_COMPONENT_RECIPES.filter(recipe => recipe.id === 'button');
         await syncOuroborosComponents({ recipes: selected });
@@ -475,6 +496,11 @@ describe('Ouroboros component sync', () => {
         const providerSet = sets.find((node: any) => node.getPluginData('ouroforge:slotProviderSet') === 'true');
         const buttonSet = sets.find((node: any) => node.name === 'Ouroboros/atoms/Button');
         const providerIds = providerSet.children.map((node: any) => node.id);
+        const userOrganizedContainer = mock.figmaMock.createFrame();
+        userOrganizedContainer.name = 'User-organized internals';
+        mock.page.appendChild(userOrganizedContainer);
+        userOrganizedContainer.appendChild(providerSet);
+        const providerParentId = userOrganizedContainer.id;
         const managedBefore = JSON.parse(buttonSet.getPluginData('ouroforge:componentProperties'));
         const swapKey = managedBefore['slot:leading-icon:swap'];
         const externalInstance = buttonSet.children[0].createInstance();
@@ -488,6 +514,7 @@ describe('Ouroboros component sync', () => {
             .filter((node: any) => node.getPluginData('ouroforge:slotProviderSet') === 'true');
         expect(providerSets).toHaveLength(1);
         expect(providerSets[0].id).toBe(providerSet.id);
+        expect(providerSets[0].parent.id).toBe(providerParentId);
         expect(providerSets[0].children.map((node: any) => node.id)).toEqual(providerIds);
         expect(JSON.parse(buttonSet.getPluginData('ouroforge:componentProperties'))).toEqual(managedBefore);
         expect(externalInstance.id).toBe(externalInstanceId);

@@ -8,6 +8,7 @@ const FIDELITY_KEY = 'ouroforge:fidelity';
 const RUST_PATH_KEY = 'ouroforge:rustPath';
 const COMPONENT_PROPERTIES_KEY = 'ouroforge:componentProperties';
 const COMPONENT_LIBRARY_PAGE_KEY = 'ouroforge:componentLibraryPage';
+const COMPONENT_LIBRARY_CONTAINER_KEY = 'ouroforge:componentLibraryContainer';
 const SLOT_PROVIDER_SET_KEY = 'ouroforge:slotProviderSet';
 const SLOT_PROVIDER_KIND_KEY = 'ouroforge:slotProviderKind';
 export const OUROBOROS_COMPONENT_LIBRARY_PAGE = 'Ouroboros UI Library';
@@ -23,6 +24,8 @@ const SWAPPABLE_SLOT_KINDS: readonly SwappableSlotKind[] = [
     'action',
     'collection',
 ];
+
+const OUROBOROS_COMPONENT_LIBRARY_CONTAINER = 'Ouroboros Components';
 
 export interface ComponentSyncOptions {
     recipes?: readonly ComponentRecipe[];
@@ -529,6 +532,26 @@ function arrangeSlotProviderSet(set: ComponentSetNode, providers: readonly Compo
     );
 }
 
+function findComponentLibraryContainer(page: PageNode): SectionNode | FrameNode | null {
+    const containers = page.children.filter((node): node is SectionNode | FrameNode =>
+        (node.type === 'SECTION' || node.type === 'FRAME')
+        && node.name === OUROBOROS_COMPONENT_LIBRARY_CONTAINER);
+    return containers.find(container =>
+        container.getPluginData(COMPONENT_LIBRARY_CONTAINER_KEY) === 'true')
+        || containers[0]
+        || null;
+}
+
+function ensureComponentLibraryContainer(page: PageNode): SectionNode | FrameNode {
+    const existing = findComponentLibraryContainer(page);
+    if (existing) return existing;
+    const section = figma.createSection();
+    section.name = OUROBOROS_COMPONENT_LIBRARY_CONTAINER;
+    section.setPluginData(COMPONENT_LIBRARY_CONTAINER_KEY, 'true');
+    page.appendChild(section);
+    return section;
+}
+
 async function ensureSlotProviders(
     page: PageNode,
     prefix: string,
@@ -538,6 +561,10 @@ async function ensureSlotProviders(
     const taggedSets = page.findAllWithCriteria({ types: ['COMPONENT_SET'] })
         .filter(set => set.getPluginData(SLOT_PROVIDER_SET_KEY) === 'true');
     let set = taggedSets[0];
+    // Once created, a provider set follows the same organization-preservation
+    // rule as public recipes: reimport never reparents it. Fresh providers go
+    // into the canonical component container, creating that section if needed.
+    const targetContainer = set ? null : ensureComponentLibraryContainer(page);
     const existingByKind = new Map<SwappableSlotKind, ComponentNode>();
     if (set) {
         for (const child of set.children) {
@@ -556,14 +583,14 @@ async function ensureSlotProviders(
         if (!provider) {
             provider = figma.createComponent();
             if (set) set.appendChild(provider);
-            else page.appendChild(provider);
+            else targetContainer!.appendChild(provider);
         }
         labels.push(await renderSlotProvider(provider, kind, index));
         providers.push(provider);
     }
 
     if (!set) {
-        set = figma.combineAsVariants(providers, page);
+        set = figma.combineAsVariants(providers, targetContainer!);
         set.x = origin.x;
         set.y = origin.y - 120;
     }
