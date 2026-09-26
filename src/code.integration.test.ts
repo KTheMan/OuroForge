@@ -228,6 +228,74 @@ function addManagedComponent(harness: FigmaHarness, id = 'button') {
     return data;
 }
 
+function addManagedComponentSetWithGuardedVariant(harness: FigmaHarness) {
+    const componentSet = pluginData() as DataNode & any;
+    Object.assign(componentSet, {
+        type: 'COMPONENT_SET',
+        name: 'Ouroboros/atoms/Button',
+        width: 320,
+        height: 120,
+        visible: true,
+        opacity: 1,
+        layoutMode: 'NONE',
+        itemSpacing: 0,
+        paddingTop: 0,
+        paddingRight: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+        cornerRadius: 0,
+        fills: [],
+        strokes: [],
+        strokeWeight: 0,
+        boundVariables: {},
+        componentPropertyDefinitions: { Variant: { type: 'VARIANT', defaultValue: 'Default' } },
+        componentPropertyReferences: null,
+        children: [],
+    });
+    componentSet.setPluginData('ouroforge:recipe', 'button');
+    componentSet.setPluginData('ouroforge:fidelity', 'visual-facsimile');
+    componentSet.setPluginData('ouroforge:rustPath', 'ouroboros_ui::atoms::Button');
+
+    const variant = pluginData() as DataNode & any;
+    Object.assign(variant, {
+        type: 'COMPONENT',
+        name: 'Variant=Default, State=Default',
+        parent: componentSet,
+        x: 24,
+        y: 24,
+        width: 180,
+        height: 32,
+        visible: true,
+        opacity: 1,
+        layoutMode: 'HORIZONTAL',
+        itemSpacing: 8,
+        paddingTop: 8,
+        paddingRight: 12,
+        paddingBottom: 8,
+        paddingLeft: 12,
+        cornerRadius: 6,
+        fills: [],
+        strokes: [],
+        strokeWeight: 1,
+        boundVariables: {},
+        componentPropertyReferences: null,
+        children: [],
+    });
+    variant.setPluginData('ouroforge:recipe', 'button');
+    variant.setPluginData('ouroforge:variant', 'State=Default, Variant=Default');
+    let forbiddenReads = 0;
+    Object.defineProperty(variant, 'componentPropertyDefinitions', {
+        get() {
+            forbiddenReads++;
+            throw new Error('Can only get component property definitions of a component set or non-variant component');
+        },
+    });
+    componentSet.children.push(variant);
+    harness.components.push(componentSet, variant);
+    harness.figma.currentPage.appendChild(componentSet);
+    return { forbiddenReads: () => forbiddenReads };
+}
+
 describe.sequential('code.ts message orchestration', () => {
     beforeEach(() => {
         vi.restoreAllMocks();
@@ -316,6 +384,18 @@ describe.sequential('code.ts message orchestration', () => {
             type: 'IMPORT_TOKENS', payload, reviewId: diff.reviewId,
         }, 'IMPORT_ERROR');
         expect(error.error).toMatch(/components changed after review/);
+    });
+
+    it('never reads component property definitions from a component-set variant', async () => {
+        const harness = createHarness();
+        const guarded = addManagedComponentSetWithGuardedVariant(harness);
+        await loadPlugin(harness);
+        const payload = { ...basePayload, categories: ['colors', 'components'] as ImportPayload['categories'] };
+
+        const diff = await sendAndWait(harness, { type: 'REQUEST_DIFF', payload }, 'DIFF_RESULT');
+
+        expect(diff.diffs.some(item => item.collectionName === 'Ouroboros Components')).toBe(true);
+        expect(guarded.forbiddenReads()).toBe(0);
     });
 
     it('allows only one of two concurrent Apply messages to consume a review', async () => {

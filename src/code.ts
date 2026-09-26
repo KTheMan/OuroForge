@@ -326,6 +326,8 @@ function serializable(value: unknown): unknown {
 
 function componentNodeSignature(node: SceneNode, includePosition = false): unknown {
     const value = node as SceneNode & Record<string, unknown>;
+    const canReadPropertyDefinitions = node.type === 'COMPONENT_SET'
+        || (node.type === 'COMPONENT' && node.parent?.type !== 'COMPONENT_SET');
     return {
         type: node.type,
         name: node.name,
@@ -351,7 +353,7 @@ function componentNodeSignature(node: SceneNode, includePosition = false): unkno
         fidelity: node.getPluginData('ouroforge:fidelity'),
         rustPath: node.getPluginData('ouroforge:rustPath'),
         renderSchema: node.getPluginData(COMPONENT_RENDER_SCHEMA_KEY),
-        componentPropertyDefinitions: 'componentPropertyDefinitions' in node
+        componentPropertyDefinitions: canReadPropertyDefinitions
             ? serializable(node.componentPropertyDefinitions)
             : undefined,
         componentPropertyReferences: serializable(node.componentPropertyReferences),
