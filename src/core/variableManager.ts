@@ -142,6 +142,16 @@ export interface VariableEntry {
     collection: VariableCollection;
 }
 
+/**
+ * Figma reports the file's pricing-tier mode cap through this documented
+ * `addMode` error. Keep this check narrow: treating every `addMode` failure as
+ * a plan limit would silently drop Dark values for unrelated API failures.
+ */
+export function isVariableModeLimitError(error: unknown): boolean {
+    return error instanceof Error
+        && /\bin addMode:\s*Limited to \d+ modes? only\b/i.test(error.message);
+}
+
 // ─── Collection Management ───────────────────────────────────────────────────
 
 /**
@@ -206,7 +216,8 @@ export function ensureModes(
             try {
                 const newModeId = collection.addMode(modeNames[i]);
                 modeIds[modeNames[i]] = newModeId;
-            } catch (e) {
+            } catch (error) {
+                if (!isVariableModeLimitError(error)) throw error;
                 modeLimited = true;
             }
         }

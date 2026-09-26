@@ -46,6 +46,33 @@ function createHarness(): FigmaHarness {
     const effectStyles: any[] = [];
     let nextId = 1;
 
+    const createPageNode = (name: string) => {
+        const page = pluginData() as DataNode & any;
+        page.id = `page-${nextId++}`;
+        page.type = 'PAGE';
+        page.name = name;
+        page.children = [];
+        page.loadAsync = async () => {};
+        page.appendChild = (child: any) => {
+            child.parent = page;
+            if (!page.children.includes(child)) page.children.push(child);
+        };
+        page.findAllWithCriteria = ({ types }: { types: string[] }) => {
+            const found: any[] = [];
+            const visit = (node: any) => {
+                for (const child of node.children || []) {
+                    if (types.includes(child.type)) found.push(child);
+                    visit(child);
+                }
+            };
+            visit(page);
+            return found;
+        };
+        return page;
+    };
+    const initialPage = createPageNode('Page 1');
+    const root = { type: 'DOCUMENT', children: [initialPage] };
+
     const createCollection = (name: string, managed = false) => {
         const shared: Record<string, string> = managed
             ? { 'ouroforge:managedCollection': managedCollectionData() }
@@ -95,7 +122,8 @@ function createHarness(): FigmaHarness {
         return node;
     };
 
-    const figma = {
+    const figma: any = {
+        root,
         showUI: vi.fn(),
         closePlugin: vi.fn(),
         ui: {
@@ -112,11 +140,12 @@ function createHarness(): FigmaHarness {
                 createVariable(collection, name, type),
             setBoundVariableForPaint: (paint: unknown) => paint,
         },
-        currentPage: {
-            findAllWithCriteria({ types }: { types: string[] }) {
-                return components.filter(node => types.includes(node.type));
-            },
-            appendChild: vi.fn(),
+        currentPage: initialPage,
+        async loadAllPagesAsync() {},
+        createPage() {
+            const page = createPageNode('Page');
+            root.children.push(page);
+            return page;
         },
         async getLocalTextStylesAsync() { return textStyles; },
         async getLocalEffectStylesAsync() { return effectStyles; },
@@ -174,7 +203,6 @@ function addManagedComponent(harness: FigmaHarness, id = 'button') {
     const data = pluginData() as DataNode & any;
     data.type = 'COMPONENT';
     data.name = 'Ouroboros/atoms/Button';
-    data.parent = { type: 'PAGE' };
     data.width = 180;
     data.height = 32;
     data.visible = true;
@@ -196,6 +224,7 @@ function addManagedComponent(harness: FigmaHarness, id = 'button') {
     data.setPluginData('ouroforge:fidelity', 'visual-facsimile');
     data.setPluginData('ouroforge:rustPath', 'ouroboros_ui::atoms::Button');
     harness.components.push(data);
+    harness.figma.currentPage.appendChild(data);
     return data;
 }
 
@@ -276,7 +305,12 @@ describe.sequential('code.ts message orchestration', () => {
         await loadPlugin(harness);
         const payload = { ...basePayload, categories: ['colors', 'components'] as ImportPayload['categories'] };
         const diff = await sendAndWait(harness, { type: 'REQUEST_DIFF', payload }, 'DIFF_RESULT');
+        const activePage = harness.figma.currentPage;
+        const libraryPage = harness.figma.createPage();
+        libraryPage.name = 'Ouroboros UI Library';
+        harness.figma.currentPage = libraryPage;
         addManagedComponent(harness);
+        harness.figma.currentPage = activePage;
 
         const error = await sendAndWait(harness, {
             type: 'IMPORT_TOKENS', payload, reviewId: diff.reviewId,
@@ -357,7 +391,12 @@ describe.sequential('code.ts message orchestration', () => {
             }],
         });
         harness.effectStyles.push(effectData);
+        const activePage = harness.figma.currentPage;
+        const libraryPage = harness.figma.createPage();
+        libraryPage.name = 'Ouroboros UI Library';
+        harness.figma.currentPage = libraryPage;
         addManagedComponent(harness);
+        harness.figma.currentPage = activePage;
 
         await loadPlugin(harness);
         const result = await sendAndWait(harness, { type: 'EXPORT_TOKENS' }, 'EXPORT_RESULT');

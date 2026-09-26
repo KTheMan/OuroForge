@@ -8,8 +8,16 @@ import { importPrimitives, importThemeTokens, type ImportOptions } from './core/
 import { diffCollection, planFromThemeTokens, snapshotFingerprint, type CollectionDiff, type ExistingVariableSnapshot } from './core/diffEngine';
 import { toDtcg, toCss, type ExportedCollection, type ExportedValue } from './core/exporter';
 import { toOuroForgeManifest, serializeOuroForgeManifest } from './contract/manifest';
-import { getManagedCollectionMetadata, getManagedTokenMetadata } from './core/variableManager';
-import { syncOuroborosComponents } from './core/componentSync';
+import {
+    getManagedCollectionMetadata,
+    getManagedTokenMetadata,
+    isVariableModeLimitError,
+} from './core/variableManager';
+import {
+    managedComponentsOnPage,
+    resolveComponentLibraryPage,
+    syncOuroborosComponents,
+} from './core/componentSync';
 import { OUROBOROS_COMPONENT_RECIPES } from './adapters/ouroborosComponents';
 import {
     componentReviewDiff,
@@ -47,8 +55,9 @@ async function detectMultiModeSupport(): Promise<boolean> {
         try {
             probe.addMode('probe');
             return true;
-        } catch (e) {
-            return false;
+        } catch (error) {
+            if (isVariableModeLimitError(error)) return false;
+            throw error;
         } finally {
             probe.remove();
         }
@@ -178,7 +187,7 @@ async function consumeReviewedResults(payload: ImportPayload, reviewId: string):
         }
     }
     if (review.componentFingerprint !== undefined) {
-        const currentComponents = snapshotManagedComponents();
+        const currentComponents = await snapshotManagedComponents();
         if (componentSnapshotFingerprint(currentComponents) !== review.componentFingerprint) {
             throw new Error('Managed Ouroboros components changed after review. Review changes again before applying.');
         }
@@ -345,12 +354,9 @@ function componentNodeSignature(node: SceneNode, includePosition = false): unkno
     };
 }
 
-function snapshotManagedComponents(): ManagedComponentSnapshot[] {
-    const nodes: Array<ComponentNode | ComponentSetNode> = [
-        ...figma.currentPage.findAllWithCriteria({ types: ['COMPONENT_SET'] }),
-        ...figma.currentPage.findAllWithCriteria({ types: ['COMPONENT'] })
-            .filter(component => component.parent?.type !== 'COMPONENT_SET'),
-    ];
+async function snapshotManagedComponents(): Promise<ManagedComponentSnapshot[]> {
+    const page = await resolveComponentLibraryPage(false);
+    const nodes = page ? managedComponentsOnPage(page) : [];
     return nodes.flatMap(node => {
         const id = node.getPluginData('ouroforge:recipe');
         return id ? [{ id, name: node.name, signature: JSON.stringify(componentNodeSignature(node)) }] : [];
@@ -419,7 +425,7 @@ async function handleDiff(payload: ImportPayload): Promise<void> {
             snapshots.push({ adapterId: adapter.id, collectionName, fingerprint: snapshotFingerprint(existing) });
             diffs.push(diffCollection(collectionName, planned, existing));
             if (adapter.id === 'ouroboros' && payload.categories.includes('components')) {
-                const components = snapshotManagedComponents();
+                const components = await snapshotManagedComponents();
                 componentFingerprint = componentSnapshotFingerprint(components);
                 diffs.push(componentReviewDiff(OUROBOROS_COMPONENT_RECIPES, components));
             }
@@ -549,11 +555,8 @@ async function handleExport(): Promise<void> {
             name: style.name,
             effects: exportBoundAliases(style.effects, variablesById) as unknown[],
         }));
-    const componentNodes = [
-        ...figma.currentPage.findAllWithCriteria({ types: ['COMPONENT_SET'] }),
-        ...figma.currentPage.findAllWithCriteria({ types: ['COMPONENT'] })
-            .filter(component => component.parent?.type !== 'COMPONENT_SET'),
-    ];
+    const componentPage = await resolveComponentLibraryPage(false);
+    const componentNodes = componentPage ? managedComponentsOnPage(componentPage) : [];
     const components = manifestComponentsFromNodes(componentNodes);
     const manifest = toOuroForgeManifest(exported, { textStyles, effectStyles, components });
     postToUI({

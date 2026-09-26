@@ -65,6 +65,7 @@ function createFigmaMock() {
 
     const makeNode = (type: string) => {
         const pluginData: Record<string, string> = {};
+        const componentPropertyDefinitions: Record<string, any> = {};
         const node: any = {
             id: `node-${++idCounter}`,
             type,
@@ -75,6 +76,9 @@ function createFigmaMock() {
             fills: [],
             strokes: [],
             boundVariables: {},
+            componentPropertyDefinitions,
+            componentPropertyReferences: null,
+            visible: true,
             x: 0,
             y: 0,
             setPluginData(key: string, value: string) { pluginData[key] = value; },
@@ -98,12 +102,29 @@ function createFigmaMock() {
                 node.width = width;
                 node.height = height;
             },
+            addComponentProperty(name: string, propertyType: string, defaultValue: string | boolean) {
+                const key = `${name}#${++idCounter}:0`;
+                componentPropertyDefinitions[key] = { type: propertyType, defaultValue };
+                return key;
+            },
+            editComponentProperty(key: string, value: { name?: string; defaultValue?: string | boolean }) {
+                const current = componentPropertyDefinitions[key];
+                const nextKey = value.name ? `${value.name}${key.slice(key.lastIndexOf('#'))}` : key;
+                componentPropertyDefinitions[nextKey] = { ...current, ...value };
+                if (nextKey !== key) delete componentPropertyDefinitions[key];
+                return nextKey;
+            },
+            deleteComponentProperty(key: string) {
+                delete componentPropertyDefinitions[key];
+            },
         };
         return node;
     };
 
     const page = makeNode('PAGE');
-    page.findAllWithCriteria = ({ types }: { types: string[] }) => {
+    page.name = 'Ouroboros UI Library';
+    page.loadAsync = async () => {};
+    const findAllWithCriteria = function (this: any, { types }: { types: string[] }) {
         const found: any[] = [];
         const visit = (node: any) => {
             for (const child of node.children) {
@@ -111,12 +132,17 @@ function createFigmaMock() {
                 visit(child);
             }
         };
-        visit(page);
+        visit(this);
         return found;
     };
+    page.findAllWithCriteria = findAllWithCriteria;
+    const root = makeNode('DOCUMENT');
+    root.appendChild(page);
 
     const figmaMock: any = {
+        root,
         currentPage: page,
+        async loadAllPagesAsync() {},
         variables: {
             async getLocalVariableCollectionsAsync() { return [managedCollection, unmanagedCollection]; },
             async getLocalVariablesAsync() { return variables; },
@@ -128,6 +154,13 @@ function createFigmaMock() {
         createComponent() { return makeNode('COMPONENT'); },
         createFrame() { return makeNode('FRAME'); },
         createText() { return makeNode('TEXT'); },
+        createPage() {
+            const created = makeNode('PAGE');
+            created.loadAsync = async () => {};
+            created.findAllWithCriteria = findAllWithCriteria;
+            root.appendChild(created);
+            return created;
+        },
         combineAsVariants(nodes: any[], parent: any) {
             const set = makeNode('COMPONENT_SET');
             parent.appendChild(set);
@@ -182,6 +215,47 @@ describe('Ouroboros component sync', () => {
         expect(mock.page.findAllWithCriteria({ types: ['COMPONENT_SET'] })).toHaveLength(expectedSets);
     });
 
+    it('covers every editable slot declared by visual-facsimile recipes', async () => {
+        await syncOuroborosComponents();
+        const topLevels = [
+            ...mock.page.findAllWithCriteria({ types: ['COMPONENT_SET'] }),
+            ...mock.page.findAllWithCriteria({ types: ['COMPONENT'] })
+                .filter((node: any) => node.parent?.type !== 'COMPONENT_SET'),
+        ];
+        let textProperties = 0;
+        let visibilityProperties = 0;
+
+        for (const recipe of OUROBOROS_COMPONENT_RECIPES) {
+            const owner = topLevels.find((node: any) => node.getPluginData('ouroforge:recipe') === recipe.id);
+            const managed = JSON.parse(owner.getPluginData('ouroforge:componentProperties') || '{}');
+            if (recipe.fidelity === 'behavioral-only') {
+                expect(managed, recipe.id).toEqual({});
+                continue;
+            }
+
+            const expected = recipe.slots.flatMap(slot => [
+                ...(slot.kind === 'text' ? [`slot:${slot.name}:text`] : []),
+                ...(slot.optional ? [`slot:${slot.name}:visible`] : []),
+            ]);
+            expect(Object.keys(managed).sort(), recipe.id).toEqual(expected.sort());
+            textProperties += recipe.slots.filter(slot => slot.kind === 'text').length;
+            visibilityProperties += recipe.slots.filter(slot => slot.optional).length;
+        }
+
+        expect(textProperties).toBe(32);
+        expect(visibilityProperties).toBe(31);
+
+        for (const set of mock.page.findAllWithCriteria({ types: ['COMPONENT_SET'] })) {
+            const positions = set.children.map((node: any) => `${node.x},${node.y}`);
+            expect(new Set(positions).size, set.name).toBe(set.children.length);
+            expect(set.clipsContent, set.name).toBe(false);
+            for (const child of set.children) {
+                expect(child.x + child.width, set.name).toBeLessThanOrEqual(set.width);
+                expect(child.y + child.height, set.name).toBeLessThanOrEqual(set.height);
+            }
+        }
+    });
+
     it('creates auto-layout component sets with token-bound paints, spacing, and radii', async () => {
         const selected = OUROBOROS_COMPONENT_RECIPES.filter(recipe => ['button', 'dialog', 'icon'].includes(recipe.id));
         await syncOuroborosComponents({ recipes: selected });
@@ -200,9 +274,110 @@ describe('Ouroboros component sync', () => {
         expect(button.boundVariables.topLeftRadius.id).toBe('var-radius-md');
         expect(button.getPluginData('ouroforge:rustPath')).toBe('ouroboros_ui::atoms::Button');
 
+        const buttonDefinitions = Object.entries(buttonSet.componentPropertyDefinitions) as [string, any][];
+        const label = buttonDefinitions.find(([key]) => key.startsWith('Label#'))!;
+        const leadingIcon = buttonDefinitions.find(([key]) => key.startsWith('Show Leading Icon#'))!;
+        expect(label[1]).toEqual({ type: 'TEXT', defaultValue: 'Button' });
+        expect(leadingIcon[1]).toEqual({ type: 'BOOLEAN', defaultValue: false });
+        for (const variant of buttonSet.children) {
+            const labelNode = variant.children.find((node: any) => node.characters === 'Button');
+            const iconNode = variant.children.find((node: any) => node.name === 'leading-icon (optional)');
+            expect(labelNode.componentPropertyReferences.characters).toBe(label[0]);
+            expect(iconNode.componentPropertyReferences.visible).toBe(leadingIcon[0]);
+            expect(iconNode.visible).toBe(false);
+        }
+
+        expect(buttonSet.clipsContent).toBe(false);
+        expect(buttonSet.width).toBe(668);
+        expect(buttonSet.height).toBe(400);
+        expect(buttonSet.children.map((node: any) => [node.x, node.y])).toEqual([
+            [24, 24], [244, 24], [464, 24],
+            [24, 88], [244, 88], [464, 88],
+            [24, 152], [244, 152], [464, 152],
+            [24, 216], [244, 216], [464, 216],
+            [24, 280], [244, 280], [464, 280],
+            [24, 344], [244, 344], [464, 344],
+        ]);
+
         const dialogSet = sets.find((node: any) => node.name === 'Ouroboros/organisms/Dialog');
         expect(dialogSet.description).toContain('Fidelity: behavioral-only');
         expect(dialogSet.children[0].children.some((node: any) => node.characters === 'Behavior implemented in Rust')).toBe(true);
+    });
+
+    it('exposes declared text and optional slots as managed editable properties', async () => {
+        const selected = OUROBOROS_COMPONENT_RECIPES.filter(recipe =>
+            recipe.fidelity === 'visual-facsimile' && ['alert', 'field-set', 'list-item'].includes(recipe.id));
+        await syncOuroborosComponents({ recipes: selected });
+
+        const sets = mock.page.findAllWithCriteria({ types: ['COMPONENT_SET'] });
+        const alert = sets.find((node: any) => node.name === 'Ouroboros/molecules/Alert');
+        const alertDefinitions = Object.entries(alert.componentPropertyDefinitions) as [string, any][];
+        expect(alertDefinitions.map(([key, value]) => [key.slice(0, key.lastIndexOf('#')), value.type]))
+            .toEqual(expect.arrayContaining([
+                ['Title', 'TEXT'],
+                ['Message', 'TEXT'],
+                ['Show Title', 'BOOLEAN'],
+                ['Show Action', 'BOOLEAN'],
+            ]));
+
+        const fieldSet = sets.find((node: any) => node.name === 'Ouroboros/molecules/FieldSet');
+        expect(Object.keys(fieldSet.componentPropertyDefinitions)
+            .some(key => key.startsWith('Legend Text#'))).toBe(true);
+        expect(Object.keys(fieldSet.componentPropertyDefinitions)
+            .some(key => key.startsWith('Legend#'))).toBe(false);
+
+        const listItem = sets.find((node: any) => node.name === 'Ouroboros/cells/ListItem');
+        const first = listItem.children[0];
+        const labelSlot = first.children.find((node: any) => node.name === 'label');
+        const labelText = labelSlot.children.find((node: any) => node.type === 'TEXT');
+        const labelKey = Object.keys(listItem.componentPropertyDefinitions)
+            .find(key => key.startsWith('Label#'))!;
+        expect(labelText.componentPropertyReferences.characters).toBe(labelKey);
+    });
+
+    it('keeps editable property identities and variant geometry stable across reimport', async () => {
+        const selected = OUROBOROS_COMPONENT_RECIPES.filter(recipe => recipe.id === 'button');
+        await syncOuroborosComponents({ recipes: selected });
+        const buttonSet = mock.page.findAllWithCriteria({ types: ['COMPONENT_SET'] })[0];
+        const firstDefinitions = { ...buttonSet.componentPropertyDefinitions };
+        const firstPositions = buttonSet.children.map((node: any) => [node.x, node.y]);
+
+        await syncOuroborosComponents({ recipes: selected });
+
+        expect(buttonSet.componentPropertyDefinitions).toEqual(firstDefinitions);
+        expect(buttonSet.children.map((node: any) => [node.x, node.y])).toEqual(firstPositions);
+        expect(Object.keys(buttonSet.componentPropertyDefinitions)).toHaveLength(2);
+    });
+
+    it('reuses a managed library across pages instead of duplicating on the active canvas', async () => {
+        const selected = OUROBOROS_COMPONENT_RECIPES.filter(recipe => recipe.id === 'button');
+        await syncOuroborosComponents({ recipes: selected });
+        const originalIds = mock.page.findAllWithCriteria({ types: ['COMPONENT'] })
+            .map((node: any) => node.id);
+        mock.page.name = 'Renamed component library';
+
+        const activePage = mock.figmaMock.createPage();
+        activePage.name = 'Sapodilla Parity';
+        mock.figmaMock.currentPage = activePage;
+        await syncOuroborosComponents({ recipes: selected });
+
+        expect(mock.page.findAllWithCriteria({ types: ['COMPONENT'] })
+            .map((node: any) => node.id)).toEqual(originalIds);
+        expect(activePage.findAllWithCriteria({ types: ['COMPONENT', 'COMPONENT_SET'] })).toEqual([]);
+        expect(mock.page.getPluginData('ouroforge:componentLibraryPage')).toBe('true');
+    });
+
+    it('creates a dedicated library page when the file has no managed component page', async () => {
+        mock.page.name = 'Sapodilla Parity';
+        const selected = OUROBOROS_COMPONENT_RECIPES.filter(recipe => recipe.id === 'button');
+        await syncOuroborosComponents({ recipes: selected });
+
+        const library = mock.figmaMock.root.children.find((node: any) =>
+            node.name === 'Ouroboros UI Library');
+        expect(library).toBeDefined();
+        expect(library).not.toBe(mock.page);
+        expect(library.findAllWithCriteria({ types: ['COMPONENT'] })).toHaveLength(18);
+        expect(mock.page.findAllWithCriteria({ types: ['COMPONENT', 'COMPONENT_SET'] })).toEqual([]);
     });
 
     it('renders semantic variants with different managed tokens and state geometry', async () => {

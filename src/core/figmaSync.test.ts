@@ -21,8 +21,11 @@ interface MockVariable {
     setSharedPluginData(namespace: string, key: string, value: string): void;
 }
 
-function createFigmaMock(opts?: { maxModes?: number; missingFontFamily?: string }) {
-    const maxModes = opts?.maxModes ?? Infinity;
+function createFigmaMock(opts?: {
+    maxModes?: number;
+    missingFontFamily?: string;
+    addModeError?: Error;
+}) {
     let idCounter = 0;
     const collections: any[] = [];
     const variables: MockVariable[] = [];
@@ -48,6 +51,8 @@ function createFigmaMock(opts?: { maxModes?: number; missingFontFamily?: string 
                         if (m) m.name = newName;
                     },
                     addMode(name2: string) {
+                        if (opts?.addModeError) throw opts.addModeError;
+                        const maxModes = opts?.maxModes ?? Infinity;
                         if (col.modes.length >= maxModes) {
                             throw new Error('in addMode: Limited to ' + maxModes + ' modes only');
                         }
@@ -411,5 +416,32 @@ describe('importThemeTokens against figma mock', () => {
         const count = limited.variables.length;
         await importThemeTokens(themeOptions());
         expect(limited.variables.length).toBe(count);
+    });
+
+    it('does not misreport unrelated addMode failures as a plan limit', async () => {
+        const broken = createFigmaMock({ addModeError: new Error('addMode failed: document is unavailable') });
+        (globalThis as Record<string, unknown>).figma = broken.figmaMock;
+
+        await expect(importThemeTokens(themeOptions())).rejects.toThrow('document is unavailable');
+        expect(broken.variables).toHaveLength(0);
+    });
+
+    it('adds Dark values idempotently when an existing Light-only file gains mode support', async () => {
+        const plan = { maxModes: 1 };
+        const upgraded = createFigmaMock(plan);
+        (globalThis as Record<string, unknown>).figma = upgraded.figmaMock;
+
+        const lightOnly = await importThemeTokens(themeOptions());
+        const variableCount = upgraded.variables.length;
+        expect(lightOnly.modeLimited).toBe(true);
+
+        plan.maxModes = 2;
+        const complete = await importThemeTokens(themeOptions());
+
+        expect(complete.modeLimited).toBe(false);
+        expect(complete.collection.modes.map((mode: { name: string }) => mode.name)).toEqual(['Light', 'Dark']);
+        expect(upgraded.variables).toHaveLength(variableCount);
+        expect(Object.keys(upgraded.variables.find(variable => variable.name === 'primary')!.valuesByMode))
+            .toHaveLength(2);
     });
 });

@@ -6,6 +6,9 @@ const RECIPE_KEY = 'ouroforge:recipe';
 const VARIANT_KEY = 'ouroforge:variant';
 const FIDELITY_KEY = 'ouroforge:fidelity';
 const RUST_PATH_KEY = 'ouroforge:rustPath';
+const COMPONENT_PROPERTIES_KEY = 'ouroforge:componentProperties';
+const COMPONENT_LIBRARY_PAGE_KEY = 'ouroforge:componentLibraryPage';
+export const OUROBOROS_COMPONENT_LIBRARY_PAGE = 'Ouroboros UI Library';
 
 export interface ComponentSyncOptions {
     recipes?: readonly ComponentRecipe[];
@@ -30,6 +33,61 @@ export interface ComponentSyncResult {
 type VariantValues = Record<string, string>;
 
 type TokenIndex = Map<string, Variable>;
+
+type EditablePropertyType = 'TEXT' | 'BOOLEAN';
+type EditablePropertyField = 'characters' | 'visible';
+
+interface EditablePropertyBinding {
+    id: string;
+    name: string;
+    type: EditablePropertyType;
+    defaultValue: string | boolean;
+    node: SceneNode;
+    field: EditablePropertyField;
+}
+
+export function managedComponentsOnPage(page: PageNode): Array<ComponentNode | ComponentSetNode> {
+    return [
+        ...page.findAllWithCriteria({ types: ['COMPONENT_SET'] }),
+        ...page.findAllWithCriteria({ types: ['COMPONENT'] })
+            .filter(component => component.parent?.type !== 'COMPONENT_SET'),
+    ].filter(node => !!node.getPluginData(RECIPE_KEY));
+}
+
+/**
+ * Locate the one page that owns the managed component library. Dynamic-page
+ * plugins cannot inspect unloaded pages, so discovery deliberately loads the
+ * document before choosing a target. Existing managed content wins over an
+ * empty named page. The most complete managed page wins; ties prefer the
+ * canonical/tagged page, then document order.
+ */
+export async function resolveComponentLibraryPage(create = false): Promise<PageNode | null> {
+    await figma.loadAllPagesAsync();
+    const pages = figma.root.children.filter((node): node is PageNode => node.type === 'PAGE');
+    const managedPages = pages
+        .map((page, index) => ({ page, index, count: managedComponentsOnPage(page).length }))
+        .filter(candidate => candidate.count > 0)
+        .sort((left, right) => {
+            if (left.count !== right.count) return right.count - left.count;
+            const leftPreferred = left.page.name === OUROBOROS_COMPONENT_LIBRARY_PAGE
+                || left.page.getPluginData(COMPONENT_LIBRARY_PAGE_KEY) === 'true';
+            const rightPreferred = right.page.name === OUROBOROS_COMPONENT_LIBRARY_PAGE
+                || right.page.getPluginData(COMPONENT_LIBRARY_PAGE_KEY) === 'true';
+            if (leftPreferred !== rightPreferred) return leftPreferred ? -1 : 1;
+            return left.index - right.index;
+        });
+    if (managedPages[0]) return managedPages[0].page;
+
+    const existing = pages.find(page =>
+        page.getPluginData(COMPONENT_LIBRARY_PAGE_KEY) === 'true'
+        || page.name === OUROBOROS_COMPONENT_LIBRARY_PAGE);
+    if (existing || !create) return existing || null;
+
+    const page = figma.createPage();
+    page.name = OUROBOROS_COMPONENT_LIBRARY_PAGE;
+    page.setPluginData(COMPONENT_LIBRARY_PAGE_KEY, 'true');
+    return page;
+}
 
 export interface ResolvedComponentVisual {
     fillToken: string | null;
@@ -371,7 +429,7 @@ async function addSlot(
     parent: ComponentNode,
     slotRecipe: ComponentSlotRecipe,
     index: TokenIndex,
-): Promise<void> {
+): Promise<{ frame: FrameNode; text: TextNode }> {
     const frame = figma.createFrame();
     frame.name = slotRecipe.optional ? `${slotRecipe.name} (optional)` : slotRecipe.name;
     frame.layoutMode = 'HORIZONTAL';
@@ -387,8 +445,124 @@ async function addSlot(
     frame.strokes = [solidPaint({ r: 0.82, g: 0.84, b: 0.87 }, token(index, 'border'))];
     frame.strokeWeight = 1;
     frame.strokeAlign = 'INSIDE';
-    await addText(frame, slotRecipe.kind === 'icon' ? '◇' : slotRecipe.name, index, true);
+    const text = await addText(frame, slotRecipe.kind === 'icon' ? '◇' : slotRecipe.name, index, true);
     parent.appendChild(frame);
+    return { frame, text };
+}
+
+function propertyLabel(name: string): string {
+    return name
+        .split('-')
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+function textPropertyName(recipe: ComponentRecipe, slot: ComponentSlotRecipe): string {
+    const label = propertyLabel(slot.name);
+    const collidesWithVariant = (recipe.variants || [])
+        .some(axis => axis.name.toLowerCase() === label.toLowerCase());
+    return collidesWithVariant ? `${label} Text` : label;
+}
+
+function propertyDisplayName(key: string): string {
+    const hash = key.lastIndexOf('#');
+    return hash < 0 ? key : key.slice(0, hash);
+}
+
+function managedPropertyMap(owner: ComponentNode | ComponentSetNode): Record<string, string> {
+    try {
+        const parsed = JSON.parse(owner.getPluginData(COMPONENT_PROPERTIES_KEY) || '{}');
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function ensureEditableProperty(
+    owner: ComponentNode | ComponentSetNode,
+    managed: Record<string, string>,
+    binding: EditablePropertyBinding,
+): string {
+    const definitions = owner.componentPropertyDefinitions;
+    let key: string | undefined = managed[binding.id];
+    let definition = key ? definitions[key] : undefined;
+
+    if (!definition || definition.type !== binding.type) {
+        const matching = Object.entries(definitions).find(([candidate, value]) =>
+            value.type === binding.type && propertyDisplayName(candidate) === binding.name);
+        key = matching?.[0];
+        definition = matching?.[1];
+    }
+
+    if (!key || !definition) {
+        return owner.addComponentProperty(binding.name, binding.type, binding.defaultValue);
+    }
+
+    if (definition.defaultValue !== binding.defaultValue) {
+        return owner.editComponentProperty(key, { defaultValue: binding.defaultValue });
+    }
+    return key;
+}
+
+function reconcileEditableProperties(
+    owner: ComponentNode | ComponentSetNode,
+    renderedBindings: readonly EditablePropertyBinding[],
+): void {
+    const managed = managedPropertyMap(owner);
+    const bindingsById = new Map<string, EditablePropertyBinding[]>();
+    for (const binding of renderedBindings) {
+        const matches = bindingsById.get(binding.id) || [];
+        matches.push(binding);
+        bindingsById.set(binding.id, matches);
+    }
+
+    const nextManaged: Record<string, string> = {};
+    for (const [id, bindings] of bindingsById) {
+        const propertyKey = ensureEditableProperty(owner, managed, bindings[0]);
+        nextManaged[id] = propertyKey;
+        for (const binding of bindings) {
+            binding.node.componentPropertyReferences = {
+                ...(binding.node.componentPropertyReferences || {}),
+                [binding.field]: propertyKey,
+            };
+        }
+    }
+
+    for (const [id, propertyKey] of Object.entries(managed)) {
+        if (nextManaged[id] || !owner.componentPropertyDefinitions[propertyKey]) continue;
+        owner.deleteComponentProperty(propertyKey);
+    }
+    owner.setPluginData(COMPONENT_PROPERTIES_KEY, JSON.stringify(nextManaged));
+}
+
+function arrangeVariantSet(
+    set: ComponentSetNode,
+    rendered: readonly ComponentNode[],
+    recipe: ComponentRecipe,
+): void {
+    const axes = recipe.variants || [];
+    const columns = axes.length > 1
+        ? axes[axes.length - 1].values.length
+        : Math.min(4, rendered.length);
+    const safeColumns = Math.max(1, columns);
+    const rows = Math.ceil(rendered.length / safeColumns);
+    const cellWidth = Math.max(...rendered.map(component => component.width));
+    const cellHeight = Math.max(...rendered.map(component => component.height));
+    const horizontalGap = 40;
+    const verticalGap = 32;
+    const padding = 24;
+
+    set.layoutMode = 'NONE';
+    set.clipsContent = false;
+    rendered.forEach((component, index) => {
+        component.x = padding + (index % safeColumns) * (cellWidth + horizontalGap);
+        component.y = padding + Math.floor(index / safeColumns) * (cellHeight + verticalGap);
+    });
+    set.resizeWithoutConstraints(
+        padding * 2 + safeColumns * cellWidth + Math.max(0, safeColumns - 1) * horizontalGap,
+        padding * 2 + rows * cellHeight + Math.max(0, rows - 1) * verticalGap,
+    );
 }
 
 async function renderComponent(
@@ -396,7 +570,7 @@ async function renderComponent(
     recipe: ComponentRecipe,
     values: VariantValues,
     index: TokenIndex,
-): Promise<void> {
+): Promise<EditablePropertyBinding[]> {
     removeChildren(component);
     component.name = displayVariantName(recipe, values);
     component.description = `${recipe.description}\nRust: ${recipe.rustPath}\nFidelity: ${recipe.fidelity}`;
@@ -434,22 +608,85 @@ async function renderComponent(
     bindFloat(component, 'opacity', token(index, visual.opacityToken || ''));
 
     const semanticControl = ['button', 'badge', 'checkbox', 'radio', 'switch', 'toggle', 'toolbar-button'].includes(recipe.id);
+    const bindings: EditablePropertyBinding[] = [];
     const enabledMark = values.Checked === 'True' || values.Selected === 'True' || values.Pressed === 'True' || values.State === 'Active';
     if (semanticControl && enabledMark) await addText(component, '✓', index, false, visual.foregroundToken, visual.fontSize, visual.fontSizeToken, visual.fontStyle);
+    if (semanticControl) {
+        for (const slotRecipe of recipe.slots.filter(slot => slot.kind === 'icon')) {
+            const { frame } = await addSlot(component, slotRecipe, index);
+            // Optional icon layers were not rendered before editable properties
+            // existed, so keep the established default appearance unchanged.
+            if (slotRecipe.optional) frame.visible = false;
+            if (slotRecipe.optional) {
+                bindings.push({
+                    id: `slot:${slotRecipe.name}:visible`,
+                    name: `Show ${propertyLabel(slotRecipe.name)}`,
+                    type: 'BOOLEAN',
+                    defaultValue: false,
+                    node: frame,
+                    field: 'visible',
+                });
+            }
+        }
+    }
     const sampleLabel = recipe.id === 'text' ? values.Role : recipe.name;
-    await addText(component, sampleLabel, index, false, visual.foregroundToken, visual.fontSize, visual.fontSizeToken, visual.fontStyle);
+    const sampleLabelNode = await addText(component, sampleLabel, index, false, visual.foregroundToken, visual.fontSize, visual.fontSizeToken, visual.fontStyle);
+    if (semanticControl) {
+        const labelSlot = recipe.slots.find(slot => slot.kind === 'text');
+        if (labelSlot) {
+            bindings.push({
+                id: `slot:${labelSlot.name}:text`,
+                name: textPropertyName(recipe, labelSlot),
+                type: 'TEXT',
+                defaultValue: sampleLabel,
+                node: sampleLabelNode,
+                field: 'characters',
+            });
+            if (labelSlot.optional) {
+                bindings.push({
+                    id: `slot:${labelSlot.name}:visible`,
+                    name: `Show ${propertyLabel(labelSlot.name)}`,
+                    type: 'BOOLEAN',
+                    defaultValue: true,
+                    node: sampleLabelNode,
+                    field: 'visible',
+                });
+            }
+        }
+    }
     if (!semanticControl) {
         for (const slotRecipe of recipe.slots) {
             if ((recipe.id === 'field-set' && slotRecipe.name === 'legend' && values.Legend === 'Hidden') ||
                 (recipe.id === 'field-separator' && slotRecipe.name === 'label' && values.Label === 'Hidden') ||
                 (recipe.id === 'graph-view' && slotRecipe.name === 'controls' && values.Controls === 'Off') ||
                 (recipe.id === 'graph-view' && slotRecipe.name === 'minimap' && values.Minimap === 'Off')) continue;
-            await addSlot(component, slotRecipe, index);
+            const { frame, text } = await addSlot(component, slotRecipe, index);
+            if (slotRecipe.kind === 'text') {
+                bindings.push({
+                    id: `slot:${slotRecipe.name}:text`,
+                    name: textPropertyName(recipe, slotRecipe),
+                    type: 'TEXT',
+                    defaultValue: slotRecipe.name,
+                    node: text,
+                    field: 'characters',
+                });
+            }
+            if (slotRecipe.optional) {
+                bindings.push({
+                    id: `slot:${slotRecipe.name}:visible`,
+                    name: `Show ${propertyLabel(slotRecipe.name)}`,
+                    type: 'BOOLEAN',
+                    defaultValue: true,
+                    node: frame,
+                    field: 'visible',
+                });
+            }
         }
     }
     if (recipe.fidelity === 'behavioral-only') {
         await addText(component, 'Behavior implemented in Rust', index, true);
     }
+    return recipe.fidelity === 'visual-facsimile' ? bindings : [];
 }
 
 function nodeMap<T extends ComponentNode | ComponentSetNode>(nodes: readonly T[]): Map<string, T> {
@@ -476,9 +713,12 @@ export async function syncOuroborosComponents(options: ComponentSyncOptions = {}
     await Promise.all(['Regular', 'Medium', 'Semi Bold', 'Bold'].map(style =>
         figma.loadFontAsync({ family: 'Inter', style })));
     const index = await buildTokenIndex();
+    const libraryPage = await resolveComponentLibraryPage(true);
+    if (!libraryPage) throw new Error('Unable to create the Ouroboros component library page.');
+    libraryPage.setPluginData(COMPONENT_LIBRARY_PAGE_KEY, 'true');
 
-    const components = figma.currentPage.findAllWithCriteria({ types: ['COMPONENT'] });
-    const sets = figma.currentPage.findAllWithCriteria({ types: ['COMPONENT_SET'] });
+    const components = libraryPage.findAllWithCriteria({ types: ['COMPONENT'] });
+    const sets = libraryPage.findAllWithCriteria({ types: ['COMPONENT_SET'] });
     const componentByKey = nodeMap(components);
     const setByKey = nodeMap(sets);
     const recipeIds = new Set(recipes.map(recipe => recipe.id));
@@ -543,6 +783,7 @@ export async function syncOuroborosComponents(options: ComponentSyncOptions = {}
             ? !!set
             : componentByKey.has(`${recipe.id}|`);
         const rendered: ComponentNode[] = [];
+        const editableBindings: EditablePropertyBinding[] = [];
 
         for (const values of variants) {
             const key = `${recipe.id}|${variantKey(values)}`;
@@ -551,12 +792,12 @@ export async function syncOuroborosComponents(options: ComponentSyncOptions = {}
                 component = figma.createComponent();
                 componentByKey.set(key, component);
                 if (set) set.appendChild(component);
-                else figma.currentPage.appendChild(component);
+                else libraryPage.appendChild(component);
                 created++;
             } else {
                 updated++;
             }
-            await renderComponent(component, recipe, values, index);
+            editableBindings.push(...await renderComponent(component, recipe, values, index));
             rendered.push(component);
             componentCount++;
         }
@@ -564,7 +805,7 @@ export async function syncOuroborosComponents(options: ComponentSyncOptions = {}
         let topLevel: ComponentNode | ComponentSetNode = rendered[0];
         if (hasVariants) {
             if (!set) {
-                set = figma.combineAsVariants(rendered, figma.currentPage);
+                set = figma.combineAsVariants(rendered, libraryPage);
                 setByKey.set(setKey, set);
                 created++;
             }
@@ -573,11 +814,13 @@ export async function syncOuroborosComponents(options: ComponentSyncOptions = {}
             set.setPluginData(RECIPE_KEY, recipe.id);
             set.setPluginData(FIDELITY_KEY, recipe.fidelity);
             set.setPluginData(RUST_PATH_KEY, recipe.rustPath);
+            arrangeVariantSet(set, rendered, recipe);
             topLevel = set;
             componentSetCount++;
         } else {
             rendered[0].name = `${prefix}/${recipe.layer}s/${recipe.name}`;
         }
+        reconcileEditableProperties(topLevel, editableBindings);
 
         // Preserve any page organization done in Figma. The grid is only an
         // initial placement policy for newly materialized recipes.
